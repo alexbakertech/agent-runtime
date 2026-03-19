@@ -29,6 +29,14 @@ interface StageData {
 export default function Home() {
   const [activeProfile, setActiveProfile] = useState<Config | null>(null);
   const [prefix, setPrefix] = useState('You are a helpful AI assistant. Answer concisely.');
+  const [historyText, setHistoryText] = useState('');
+  
+  // Toggles for Loop Components
+  const [prefixEnabled, setPrefixEnabled] = useState(true);
+  const [prefixMinimized, setPrefixMinimized] = useState(false);
+  const [historyEnabled, setHistoryEnabled] = useState(true);
+  const [historyMinimized, setHistoryMinimized] = useState(false);
+
   const [loopStage, setLoopStage] = useState<LoopStage>('idle');
   const [stageData, setStageData] = useState<StageData>({});
   
@@ -112,10 +120,15 @@ export default function Home() {
     setChatStatus('loading');
     setStageData({});
     
-    // Add user message
+    // Add user message to history area if enabled
+    if (historyEnabled) {
+      setHistoryText(prev => prev + (prev ? '\n\n' : '') + `User: ${currentInput}`);
+    }
+
+    // Add user message to CHAT VIEW
     setMessages(prev => [...prev, { role: 'user', content: currentInput }]);
     
-    // Prepare for assistant response
+    // Prepare for assistant response in CHAT VIEW
     setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
     
     const controller = new AbortController();
@@ -123,8 +136,12 @@ export default function Home() {
 
     try {
       // STAGE 1: Preparing
-      const fullPrompt = `${prefix}\n\nUser: ${currentInput}`;
-      await waitIfStepping('preparing', fullPrompt);
+      let finalPrompt = '';
+      if (prefixEnabled) finalPrompt += prefix + '\n\n';
+      if (historyEnabled && historyText) finalPrompt += historyText + '\n\n';
+      finalPrompt += `User: ${currentInput}`;
+
+      await waitIfStepping('preparing', finalPrompt);
 
       // STAGE 2: Calling
       const callInfo = {
@@ -134,7 +151,7 @@ export default function Home() {
         method: 'POST',
         body: {
           model: activeProfile.model,
-          message: fullPrompt
+          message: finalPrompt
         }
       };
       await waitIfStepping('calling', callInfo);
@@ -142,7 +159,7 @@ export default function Home() {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...activeProfile, message: fullPrompt }),
+        body: JSON.stringify({ ...activeProfile, message: finalPrompt }),
         signal: controller.signal
       });
 
@@ -180,6 +197,11 @@ export default function Home() {
         });
       }
       
+      // Update persistent history box with assistant response
+      if (historyEnabled) {
+        setHistoryText(prev => prev + '\n\nAssistant: ' + accumulatedResponse);
+      }
+
       setLoopStage('finished');
       setChatStatus('idle');
     } catch (err: any) {
@@ -214,6 +236,21 @@ export default function Home() {
     if (abortControllerRef.current) abortControllerRef.current.abort();
   };
 
+  const LoopComponentHeader = ({ label, enabled, onToggleEnable, minimized, onToggleMinimize }: any) => (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <input type="checkbox" checked={enabled} onChange={e => onToggleEnable(e.target.checked)} />
+        <label style={{ fontSize: '0.7rem', fontWeight: 700, color: enabled ? '#64748b' : '#cbd5e1', textTransform: 'uppercase' }}>{label}</label>
+      </div>
+      <button 
+        onClick={() => onToggleMinimize(!minimized)}
+        style={{ fontSize: '0.65rem', color: '#94a3b8', background: 'none', border: 'none', cursor: 'pointer' }}
+      >
+        {minimized ? 'MAXIMIZE' : 'MINIMIZE'}
+      </button>
+    </div>
+  );
+
   if (!activeProfile) {
     return (
       <div style={{ padding: '3rem', textAlign: 'center', fontFamily: 'system-ui' }}>
@@ -228,46 +265,81 @@ export default function Home() {
       
       {/* LEFT PANEL - Loop Visualizer */}
       <section style={{ 
-        flex: 1, 
+        width: '450px', 
         borderRight: '1px solid #e2e8f0', 
         display: 'flex', 
         flexDirection: 'column',
-        backgroundColor: '#f8fafc'
+        backgroundColor: '#f8fafc',
+        flexShrink: 0
       }}>
         <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid #e2e8f0', backgroundColor: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800 }}>RUNTIME LOOP</h2>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer' }}>
-              <input type="checkbox" checked={stepMode} onChange={e => setStepMode(e.target.checked)} />
-              Step Mode
-            </label>
-          </div>
+          <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer' }}>
+            <input type="checkbox" checked={stepMode} onChange={e => setStepMode(e.target.checked)} />
+            Step Mode
+          </label>
         </div>
 
         <div style={{ padding: '1.5rem', flex: 1, overflowY: 'auto' }}>
-          <div style={{ marginBottom: '2rem' }}>
-            <label style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '0.5rem' }}>Prompt Prefix (System)</label>
-            <textarea 
-              value={prefix} 
-              onChange={(e) => setPrefix(e.target.value)}
-              style={{ 
-                width: '100%', 
-                minHeight: '80px', 
-                padding: '0.75rem', 
-                borderRadius: '8px', 
-                border: '1px solid #e2e8f0', 
-                fontFamily: 'monospace', 
-                fontSize: '0.85rem',
-                backgroundColor: '#fff',
-                resize: 'vertical'
-              }}
+          {/* PREFIX BOX */}
+          <div style={{ marginBottom: '1.5rem', opacity: prefixEnabled ? 1 : 0.5 }}>
+            <LoopComponentHeader 
+              label="Prompt Prefix" 
+              enabled={prefixEnabled} onToggleEnable={setPrefixEnabled} 
+              minimized={prefixMinimized} onToggleMinimize={setPrefixMinimized} 
             />
+            {!prefixMinimized && (
+              <textarea 
+                value={prefix} 
+                onChange={(e) => setPrefix(e.target.value)}
+                disabled={!prefixEnabled}
+                style={{ 
+                  width: '100%', 
+                  height: '80px', 
+                  padding: '0.6rem', 
+                  borderRadius: '6px', 
+                  border: '1px solid #e2e8f0', 
+                  fontFamily: 'monospace', 
+                  fontSize: '0.8rem',
+                  backgroundColor: prefixEnabled ? '#fff' : '#f1f5f9',
+                  resize: 'vertical'
+                }}
+              />
+            )}
+          </div>
+
+          {/* HISTORY BOX */}
+          <div style={{ marginBottom: '2rem', opacity: historyEnabled ? 1 : 0.5 }}>
+            <LoopComponentHeader 
+              label="Conversation History" 
+              enabled={historyEnabled} onToggleEnable={setHistoryEnabled} 
+              minimized={historyMinimized} onToggleMinimize={setHistoryMinimized} 
+            />
+            {!historyMinimized && (
+              <textarea 
+                value={historyText} 
+                onChange={(e) => setHistoryText(e.target.value)}
+                disabled={!historyEnabled}
+                placeholder="Chat history will accumulate here..."
+                style={{ 
+                  width: '100%', 
+                  height: '150px', 
+                  padding: '0.6rem', 
+                  borderRadius: '6px', 
+                  border: '1px solid #e2e8f0', 
+                  fontFamily: 'monospace', 
+                  fontSize: '0.8rem',
+                  backgroundColor: historyEnabled ? '#fff' : '#f1f5f9',
+                  resize: 'vertical'
+                }}
+              />
+            )}
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <h3 style={{ margin: 0, fontSize: '0.7rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Execution Flow</h3>
             
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
               {[
                 { id: 'preparing', label: '1. Preparing Context', data: stageData.preparing },
                 { id: 'calling', label: '2. Calling Model API', data: stageData.calling },
@@ -281,7 +353,7 @@ export default function Home() {
                 return (
                   <div key={step.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                     <div style={{ 
-                      padding: '0.75rem', 
+                      padding: '0.6rem 0.75rem', 
                       borderRadius: '6px', 
                       backgroundColor: isActive ? '#fff' : 'transparent',
                       border: `1px solid ${isActive ? '#bfdbfe' : '#e2e8f0'}`,
@@ -290,12 +362,12 @@ export default function Home() {
                       alignItems: 'center',
                       gap: '0.75rem',
                       fontWeight: isActive ? 600 : 400,
-                      fontSize: '0.85rem',
+                      fontSize: '0.8rem',
                       opacity: loopStage === 'idle' ? 0.5 : 1
                     }}>
                       <div style={{ 
-                        width: '8px', 
-                        height: '8px', 
+                        width: '6px', 
+                        height: '6px', 
                         borderRadius: '50%', 
                         backgroundColor: isActive ? '#3b82f6' : (hasData ? '#10b981' : '#e2e8f0') 
                       }} />
@@ -304,40 +376,31 @@ export default function Home() {
                       {hasData && (
                         <button 
                           onClick={() => toggleStageExpansion(step.id)}
-                          style={{ marginLeft: 'auto', fontSize: '0.7rem', color: '#3b82f6', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+                          style={{ marginLeft: 'auto', fontSize: '0.65rem', color: '#3b82f6', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
                         >
-                          {isExpanded ? 'HIDE RAW' : 'INSPECT'}
+                          {isExpanded ? 'HIDE' : 'INSPECT'}
                         </button>
                       )}
                     </div>
                     
                     {isExpanded && hasData && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '0.5rem' }}>
                         {step.id === 'calling' && (
                           <button 
                             onClick={(e) => { e.stopPropagation(); setShowFullPrompt(!showFullPrompt); }}
-                            style={{ 
-                              alignSelf: 'flex-start', 
-                              fontSize: '0.65rem', 
-                              padding: '0.2rem 0.4rem', 
-                              backgroundColor: '#334155', 
-                              color: '#e2e8f0', 
-                              border: 'none', 
-                              borderRadius: '4px', 
-                              cursor: 'pointer' 
-                            }}
+                            style={{ alignSelf: 'flex-start', fontSize: '0.6rem', padding: '0.1rem 0.3rem', backgroundColor: '#334155', color: '#e2e8f0', border: 'none', borderRadius: '3px', cursor: 'pointer' }}
                           >
                             {showFullPrompt ? 'HIDE PROMPT CONTENT' : 'SHOW FULL PROMPT'}
                           </button>
                         )}
                         <div style={{ 
-                          padding: '0.75rem', 
+                          padding: '0.6rem', 
                           backgroundColor: '#1e293b', 
                           color: '#e2e8f0', 
-                          fontSize: '0.75rem', 
+                          fontSize: '0.7rem', 
                           fontFamily: 'monospace', 
                           borderRadius: '6px',
-                          maxHeight: '200px',
+                          maxHeight: '150px',
                           overflowY: 'auto',
                           whiteSpace: 'pre-wrap'
                         }}>
@@ -359,12 +422,6 @@ export default function Home() {
                 );
               })}
             </div>
-            
-            {loopStage === 'error' && (
-              <div style={{ padding: '0.75rem', borderRadius: '6px', backgroundColor: '#fee2e2', color: '#991b1b', fontSize: '0.8rem' }}>
-                <strong>CRITICAL ERROR:</strong> {stageData.error}
-              </div>
-            )}
           </div>
         </div>
 
@@ -372,38 +429,19 @@ export default function Home() {
           {isWaitingForNext ? (
             <button 
               onClick={() => nextStepAction?.()}
-              style={{ 
-                flex: 1,
-                padding: '0.75rem', 
-                borderRadius: '8px', 
-                backgroundColor: '#3b82f6', 
-                color: 'white', 
-                border: 'none',
-                cursor: 'pointer',
-                fontWeight: 700,
-                boxShadow: '0 4px 6px -1px rgba(59, 130, 246, 0.3)'
-              }}
+              style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', backgroundColor: '#3b82f6', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 700, boxShadow: '0 4px 6px -1px rgba(59, 130, 246, 0.3)' }}
             >NEXT STEP →</button>
           ) : (
             <button 
-              onClick={() => { setMessages([]); setLoopStage('idle'); setStageData({}); }} 
-              style={{ 
-                flex: 1,
-                padding: '0.5rem', 
-                borderRadius: '6px', 
-                border: '1px solid #e2e8f0', 
-                background: '#fff', 
-                cursor: 'pointer',
-                fontSize: '0.8rem',
-                color: '#475569'
-              }}
-            >Reset Loop</button>
+              onClick={() => { setMessages([]); setLoopStage('idle'); setStageData({}); setHistoryText(''); }} 
+              style={{ flex: 1, padding: '0.5rem', borderRadius: '6px', border: '1px solid #e2e8f0', background: '#fff', cursor: 'pointer', fontSize: '0.8rem', color: '#475569' }}
+            >Reset Loop & History</button>
           )}
         </div>
       </section>
 
       {/* RIGHT PANEL - Chat View */}
-      <section style={{ flex: 1.2, display: 'flex', flexDirection: 'column', backgroundColor: '#fff' }}>
+      <section style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#fff' }}>
         <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800 }}>CHAT VIEW</h2>
           <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>{activeProfile.name} • {activeProfile.model || 'default'}</div>
