@@ -1,5 +1,4 @@
 import { OpenAI } from 'openai';
-import { NextResponse } from 'next/server';
 
 export async function POST(req: Request) {
   try {
@@ -10,19 +9,37 @@ export async function POST(req: Request) {
       apiKey: apiKey,
     });
 
-    const response = await openai.chat.completions.create({
+    const stream = await openai.chat.completions.create({
       model: model || 'default',
       messages: [{ role: 'user', content: message }],
+      stream: true,
     });
 
-    return NextResponse.json({ 
-      content: response.choices[0].message.content 
+    // Create a ReadableStream to pipe the response
+    const readableStream = new ReadableStream({
+      async start(controller) {
+        for await (const chunk of stream) {
+          const content = chunk.choices[0]?.delta?.content || '';
+          if (content) {
+            controller.enqueue(new TextEncoder().encode(content));
+          }
+        }
+        controller.close();
+      },
+    });
+
+    return new Response(readableStream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
     });
   } catch (error: any) {
     console.error('Chat error:', error);
-    return NextResponse.json(
-      { error: error.message || 'Failed to get response from model' },
-      { status: 500 }
+    return new Response(
+      JSON.stringify({ error: error.message || 'Failed to get stream from model' }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } }
     );
   }
 }

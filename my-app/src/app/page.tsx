@@ -195,6 +195,9 @@ export default function Home() {
     // Add user message to history
     setMessages(prev => [...prev, { role: 'user', content: currentInput }]);
     
+    // Create a placeholder for the assistant response
+    setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+    
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
@@ -205,19 +208,54 @@ export default function Home() {
         body: JSON.stringify({ ...config, message: currentInput }),
         signal: controller.signal
       });
-      const data = await res.json();
-      if (res.ok) {
-        setMessages(prev => [...prev, { role: 'assistant', content: data.content }]);
-        setChatStatus('idle');
-      } else {
+
+      if (!res.ok) {
+        const data = await res.json();
         throw new Error(data.error || 'Chat failed');
       }
+
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+
+      if (!reader) throw new Error('No reader found on response');
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        
+        // Update the LAST assistant message in history
+        setMessages(prev => {
+          const newMessages = [...prev];
+          const lastIdx = newMessages.length - 1;
+          if (newMessages[lastIdx].role === 'assistant') {
+            newMessages[lastIdx] = { 
+              ...newMessages[lastIdx], 
+              content: newMessages[lastIdx].content + chunk 
+            };
+          }
+          return newMessages;
+        });
+      }
+      
+      setChatStatus('idle');
     } catch (err: any) {
       if (err.name === 'AbortError') {
-        setMessages(prev => [...prev, { role: 'assistant', content: '_Request stopped by user._' }]);
+        // We don't clear, we just stop. The user already has the partial content.
         setChatStatus('idle');
       } else {
-        setMessages(prev => [...prev, { role: 'assistant', content: `**Error:** ${err.message}` }]);
+        setMessages(prev => {
+          const newMessages = [...prev];
+          const lastIdx = newMessages.length - 1;
+          if (newMessages[lastIdx].role === 'assistant') {
+            newMessages[lastIdx] = { 
+              ...newMessages[lastIdx], 
+              content: newMessages[lastIdx].content + `\n\n**Error:** ${err.message}` 
+            };
+          }
+          return newMessages;
+        });
         setChatStatus('error');
       }
     } finally {
