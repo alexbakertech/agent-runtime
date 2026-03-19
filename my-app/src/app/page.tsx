@@ -19,11 +19,28 @@ interface Message {
 
 type LoopStage = 'idle' | 'preparing' | 'calling' | 'receiving' | 'finished' | 'error';
 
+interface StageData {
+  preparing?: string;
+  calling?: any;
+  receiving?: string;
+  error?: string;
+}
+
 export default function Home() {
   const [activeProfile, setActiveProfile] = useState<Config | null>(null);
   const [prefix, setPrefix] = useState('You are a helpful AI assistant. Answer concisely.');
   const [loopStage, setLoopStage] = useState<LoopStage>('idle');
+  const [stageData, setStageData] = useState<StageData>({});
   
+  // Debug / Stepping State
+  const [stepMode, setStepMode] = useState(false);
+  const [isWaitingForNext, setIsWaitingForNext] = useState(false);
+  const [nextStepAction, setNextStepAction] = useState<(() => void) | null>(null);
+  const [showFullPrompt, setShowFullPrompt] = useState(false);
+  
+  // UI State
+  const [expandedStages, setExpandedStages] = useState<Record<string, boolean>>({});
+
   // Chat state
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
@@ -66,6 +83,26 @@ export default function Home() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  const toggleStageExpansion = (stage: string) => {
+    setExpandedStages(prev => ({ ...prev, [stage]: !prev[stage] }));
+  };
+
+  // Helper to handle stepping logic
+  const waitIfStepping = async (stage: LoopStage, data?: any) => {
+    setLoopStage(stage);
+    if (data) setStageData(prev => ({ ...prev, [stage]: data }));
+    
+    if (stepMode) {
+      setIsWaitingForNext(true);
+      return new Promise<void>((resolve) => {
+        setNextStepAction(() => () => {
+          setIsWaitingForNext(false);
+          resolve();
+        });
+      });
+    }
+  };
+
   const handleChat = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || chatStatus === 'loading' || !activeProfile) return;
@@ -73,7 +110,7 @@ export default function Home() {
     const currentInput = input;
     setInput('');
     setChatStatus('loading');
-    setLoopStage('preparing');
+    setStageData({});
     
     // Add user message
     setMessages(prev => [...prev, { role: 'user', content: currentInput }]);
@@ -85,9 +122,22 @@ export default function Home() {
     abortControllerRef.current = controller;
 
     try {
-      setLoopStage('calling');
-      // In a real loop, we'd combine prefix + currentInput
+      // STAGE 1: Preparing
       const fullPrompt = `${prefix}\n\nUser: ${currentInput}`;
+      await waitIfStepping('preparing', fullPrompt);
+
+      // STAGE 2: Calling
+      const callInfo = {
+        url: activeProfile.baseUrl,
+        model: activeProfile.model,
+        headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        body: {
+          model: activeProfile.model,
+          message: fullPrompt
+        }
+      };
+      await waitIfStepping('calling', callInfo);
 
       const res = await fetch('/api/chat', {
         method: 'POST',
@@ -101,16 +151,21 @@ export default function Home() {
         throw new Error(data.error || 'Chat failed');
       }
 
+      // STAGE 3: Receiving
       setLoopStage('receiving');
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();
       if (!reader) throw new Error('No reader found');
 
+      let accumulatedResponse = '';
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
         const chunk = decoder.decode(value);
+        accumulatedResponse += chunk;
+        
+        setStageData(prev => ({ ...prev, receiving: accumulatedResponse }));
         
         setMessages(prev => {
           const newMessages = [...prev];
@@ -129,6 +184,9 @@ export default function Home() {
       setChatStatus('idle');
     } catch (err: any) {
       setLoopStage('error');
+      const errMsg = err.name === 'AbortError' ? 'Stopped by user' : err.message;
+      setStageData(prev => ({ ...prev, error: errMsg }));
+      
       if (err.name === 'AbortError') {
         setChatStatus('idle');
         setLoopStage('finished');
@@ -148,6 +206,7 @@ export default function Home() {
       }
     } finally {
       abortControllerRef.current = null;
+      setIsWaitingForNext(false);
     }
   };
 
@@ -175,8 +234,14 @@ export default function Home() {
         flexDirection: 'column',
         backgroundColor: '#f8fafc'
       }}>
-        <div style={{ padding: '1.5rem', borderBottom: '1px solid #e2e8f0', backgroundColor: '#fff' }}>
-          <h2 style={{ margin: 0, fontSize: '1rem', fontWeight: 800 }}>RUNTIME LOOP</h2>
+        <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid #e2e8f0', backgroundColor: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800 }}>RUNTIME LOOP</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer' }}>
+              <input type="checkbox" checked={stepMode} onChange={e => setStepMode(e.target.checked)} />
+              Step Mode
+            </label>
+          </div>
         </div>
 
         <div style={{ padding: '1.5rem', flex: 1, overflowY: 'auto' }}>
@@ -187,7 +252,7 @@ export default function Home() {
               onChange={(e) => setPrefix(e.target.value)}
               style={{ 
                 width: '100%', 
-                minHeight: '120px', 
+                minHeight: '80px', 
                 padding: '0.75rem', 
                 borderRadius: '8px', 
                 border: '1px solid #e2e8f0', 
@@ -202,98 +267,188 @@ export default function Home() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <h3 style={{ margin: 0, fontSize: '0.7rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Execution Flow</h3>
             
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
               {[
-                { stage: 'preparing', label: '1. Preparing Context' },
-                { stage: 'calling', label: '2. Calling Model API' },
-                { stage: 'receiving', label: '3. Streaming Response' },
-                { stage: 'finished', label: '4. Loop Complete' }
-              ].map((step, i) => (
-                <div key={i} style={{ 
-                  padding: '0.75rem', 
-                  borderRadius: '6px', 
-                  backgroundColor: loopStage === step.stage ? '#fff' : 'transparent',
-                  border: `1px solid ${loopStage === step.stage ? '#bfdbfe' : 'transparent'}`,
-                  color: loopStage === step.stage ? '#1e40af' : '#94a3b8',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.75rem',
-                  fontWeight: loopStage === step.stage ? 600 : 400,
-                  fontSize: '0.9rem'
-                }}>
-                  <div style={{ 
-                    width: '8px', 
-                    height: '8px', 
-                    borderRadius: '50%', 
-                    backgroundColor: loopStage === step.stage ? '#3b82f6' : '#e2e8f0' 
-                  }} />
-                  {step.label}
-                  {loopStage === step.stage && <span style={{ fontSize: '0.7rem', marginLeft: 'auto' }}>ACTIVE</span>}
-                </div>
-              ))}
+                { id: 'preparing', label: '1. Preparing Context', data: stageData.preparing },
+                { id: 'calling', label: '2. Calling Model API', data: stageData.calling },
+                { id: 'receiving', label: '3. Streaming Response', data: stageData.receiving },
+                { id: 'finished', label: '4. Loop Complete', data: null }
+              ].map((step) => {
+                const isActive = loopStage === step.id;
+                const isExpanded = expandedStages[step.id];
+                const hasData = !!step.data;
+
+                return (
+                  <div key={step.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    <div style={{ 
+                      padding: '0.75rem', 
+                      borderRadius: '6px', 
+                      backgroundColor: isActive ? '#fff' : 'transparent',
+                      border: `1px solid ${isActive ? '#bfdbfe' : '#e2e8f0'}`,
+                      color: isActive ? '#1e40af' : '#64748b',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      fontWeight: isActive ? 600 : 400,
+                      fontSize: '0.85rem',
+                      opacity: loopStage === 'idle' ? 0.5 : 1
+                    }}>
+                      <div style={{ 
+                        width: '8px', 
+                        height: '8px', 
+                        borderRadius: '50%', 
+                        backgroundColor: isActive ? '#3b82f6' : (hasData ? '#10b981' : '#e2e8f0') 
+                      }} />
+                      {step.label}
+                      
+                      {hasData && (
+                        <button 
+                          onClick={() => toggleStageExpansion(step.id)}
+                          style={{ marginLeft: 'auto', fontSize: '0.7rem', color: '#3b82f6', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+                        >
+                          {isExpanded ? 'HIDE RAW' : 'INSPECT'}
+                        </button>
+                      )}
+                    </div>
+                    
+                    {isExpanded && hasData && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                        {step.id === 'calling' && (
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); setShowFullPrompt(!showFullPrompt); }}
+                            style={{ 
+                              alignSelf: 'flex-start', 
+                              fontSize: '0.65rem', 
+                              padding: '0.2rem 0.4rem', 
+                              backgroundColor: '#334155', 
+                              color: '#e2e8f0', 
+                              border: 'none', 
+                              borderRadius: '4px', 
+                              cursor: 'pointer' 
+                            }}
+                          >
+                            {showFullPrompt ? 'HIDE PROMPT CONTENT' : 'SHOW FULL PROMPT'}
+                          </button>
+                        )}
+                        <div style={{ 
+                          padding: '0.75rem', 
+                          backgroundColor: '#1e293b', 
+                          color: '#e2e8f0', 
+                          fontSize: '0.75rem', 
+                          fontFamily: 'monospace', 
+                          borderRadius: '6px',
+                          maxHeight: '200px',
+                          overflowY: 'auto',
+                          whiteSpace: 'pre-wrap'
+                        }}>
+                          {step.id === 'calling' ? (
+                            JSON.stringify({
+                              ...step.data,
+                              body: {
+                                ...step.data.body,
+                                message: showFullPrompt ? step.data.body.message : '[PROMPT_CONTEXT]'
+                              }
+                            }, null, 2)
+                          ) : (
+                            typeof step.data === 'string' ? step.data : JSON.stringify(step.data, null, 2)
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
             
             {loopStage === 'error' && (
-              <div style={{ padding: '0.75rem', borderRadius: '6px', backgroundColor: '#fee2e2', color: '#991b1b', fontSize: '0.8rem', fontWeight: 600 }}>
-                CRITICAL ERROR IN LOOP
+              <div style={{ padding: '0.75rem', borderRadius: '6px', backgroundColor: '#fee2e2', color: '#991b1b', fontSize: '0.8rem' }}>
+                <strong>CRITICAL ERROR:</strong> {stageData.error}
               </div>
             )}
           </div>
         </div>
 
-        <div style={{ padding: '1.5rem', borderTop: '1px solid #e2e8f0', backgroundColor: '#fff' }}>
-          <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.5rem' }}>ACTIVE PROFILE: <strong>{activeProfile.name}</strong></div>
-          <button 
-            onClick={() => setMessages([])} 
-            style={{ 
-              width: '100%', 
-              padding: '0.5rem', 
-              borderRadius: '6px', 
-              border: '1px solid #e2e8f0', 
-              background: '#fff', 
-              cursor: 'pointer',
-              fontSize: '0.8rem',
-              color: '#475569'
-            }}
-          >Reset Execution</button>
+        <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid #e2e8f0', backgroundColor: '#fff', display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          {isWaitingForNext ? (
+            <button 
+              onClick={() => nextStepAction?.()}
+              style={{ 
+                flex: 1,
+                padding: '0.75rem', 
+                borderRadius: '8px', 
+                backgroundColor: '#3b82f6', 
+                color: 'white', 
+                border: 'none',
+                cursor: 'pointer',
+                fontWeight: 700,
+                boxShadow: '0 4px 6px -1px rgba(59, 130, 246, 0.3)'
+              }}
+            >NEXT STEP →</button>
+          ) : (
+            <button 
+              onClick={() => { setMessages([]); setLoopStage('idle'); setStageData({}); }} 
+              style={{ 
+                flex: 1,
+                padding: '0.5rem', 
+                borderRadius: '6px', 
+                border: '1px solid #e2e8f0', 
+                background: '#fff', 
+                cursor: 'pointer',
+                fontSize: '0.8rem',
+                color: '#475569'
+              }}
+            >Reset Loop</button>
+          )}
         </div>
       </section>
 
       {/* RIGHT PANEL - Chat View */}
       <section style={{ flex: 1.2, display: 'flex', flexDirection: 'column', backgroundColor: '#fff' }}>
-        <div style={{ padding: '1.5rem', borderBottom: '1px solid #e2e8f0' }}>
-          <h2 style={{ margin: 0, fontSize: '1rem', fontWeight: 800 }}>CHAT VIEW</h2>
+        <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800 }}>CHAT VIEW</h2>
+          <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>{activeProfile.name} • {activeProfile.model || 'default'}</div>
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '2rem' }}>
           <div style={{ maxWidth: '600px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-            {messages.map((msg, i) => (
-              <div key={i} style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
-                <div style={{ 
-                  backgroundColor: msg.role === 'user' ? '#3b82f6' : '#1e293b', 
-                  color: 'white', 
-                  width: '24px', 
-                  height: '24px', 
-                  borderRadius: '4px', 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  justifyContent: 'center', 
-                  fontWeight: 800, 
-                  fontSize: '0.65rem', 
-                  flexShrink: 0,
-                  marginTop: '4px'
-                }}>{msg.role === 'user' ? 'U' : 'AI'}</div>
-                <div style={{ 
-                  whiteSpace: 'pre-wrap', 
-                  lineHeight: 1.6, 
-                  fontSize: '0.95rem', 
-                  color: '#334155'
-                }}>
-                  {msg.content}
+            {messages.length > 0 ? (
+              <>
+                {messages.map((msg, i) => (
+                  <div key={i} style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
+                    <div style={{ 
+                      backgroundColor: msg.role === 'user' ? '#3b82f6' : '#1e293b', 
+                      color: 'white', 
+                      width: '24px', 
+                      height: '24px', 
+                      borderRadius: '4px', 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      justifyContent: 'center', 
+                      fontWeight: 800, 
+                      fontSize: '0.65rem', 
+                      flexShrink: 0,
+                      marginTop: '4px'
+                    }}>{msg.role === 'user' ? 'U' : 'AI'}</div>
+                    <div style={{ 
+                      whiteSpace: 'pre-wrap', 
+                      lineHeight: 1.6, 
+                      fontSize: '0.95rem', 
+                      color: '#334155'
+                    }}>
+                      {msg.content || (chatStatus === 'loading' && i === messages.length - 1 ? '...' : '')}
+                    </div>
+                  </div>
+                ))}
+                <div ref={messagesEndRef} />
+              </>
+            ) : (
+              <div style={{ display: 'flex', height: '60vh', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '1rem' }}>
+                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#e2e8f0' }}>READY</div>
+                <div style={{ color: '#94a3b8', fontSize: '0.875rem' }}>
+                  Send a message to execute the runtime loop.
                 </div>
               </div>
-            ))}
-            <div ref={messagesEndRef} />
+            )}
           </div>
         </div>
 
@@ -305,6 +460,7 @@ export default function Home() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="Message local agent..."
+                disabled={isWaitingForNext}
                 rows={1}
                 style={{ 
                   width: '100%',
@@ -317,7 +473,7 @@ export default function Home() {
                   boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)',
                   resize: 'none',
                   outline: 'none',
-                  backgroundColor: '#fff',
+                  backgroundColor: isWaitingForNext ? '#f8fafc' : '#fff',
                   minHeight: '52px',
                   maxHeight: '160px',
                   overflowY: 'auto'
@@ -338,7 +494,8 @@ export default function Home() {
               ) : (
                 <button
                   type="submit"
-                  style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', border: 'none', backgroundColor: '#3b82f6', color: 'white', cursor: 'pointer', borderRadius: '6px', width: '28px', height: '28px' }}
+                  disabled={isWaitingForNext}
+                  style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', border: 'none', backgroundColor: '#3b82f6', color: 'white', cursor: isWaitingForNext ? 'not-allowed' : 'pointer', borderRadius: '6px', width: '28px', height: '28px' }}
                 >↑</button>
               )}
             </form>
