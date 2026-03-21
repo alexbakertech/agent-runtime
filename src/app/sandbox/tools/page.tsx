@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import { toolDefinitions } from '@/lib/tools/definitions';
-import { listFiles, writeFile, deleteFile, readFile, exportAsJson, importFromJson, FileEntry } from '@/lib/tools/file-storage';
+import { listFiles, writeFile, deleteFile, readFile, importFromJson, FileEntry } from '@/lib/tools/file-storage';
 import { searchInFiles } from '@/lib/tools/file-walker';
 
 type ExecutionStep = {
@@ -71,7 +71,7 @@ export default function ToolsSandbox() {
   const [uploadName, setUploadName] = useState('');
   const [uploadContent, setUploadContent] = useState('');
   const [isRefreshingFiles, setIsRefreshingFiles] = useState(false);
-  const [importExportStatus, setImportExportStatus] = useState<string>('');
+  const [importStatus, setImportStatus] = useState<string>('');
 
   // Initialize tool drafts from toolDefinitions
   const [toolDrafts, setToolDrafts] = useState<Record<string, ToolDraft>>(() => {
@@ -115,24 +115,6 @@ export default function ToolsSandbox() {
     } catch (e) { console.error(e); }
   };
 
-  const handleExport = async () => {
-    try {
-      const json = await exportAsJson();
-      const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `sandbox-export-${new Date().toISOString().split('T')[0]}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      setImportExportStatus('Exported successfully');
-      setTimeout(() => setImportExportStatus(''), 3000);
-    } catch (e: any) { 
-      setImportExportStatus(`Export failed: ${e.message}`);
-      setTimeout(() => setImportExportStatus(''), 5000);
-    }
-  };
-
   const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -140,12 +122,12 @@ export default function ToolsSandbox() {
     try {
       const text = await file.text();
       const result = await importFromJson(text);
-      setImportExportStatus(`Imported ${result.imported} files`);
+      setImportStatus(`Imported ${result.imported} files`);
       refreshSandboxFiles();
-      setTimeout(() => setImportExportStatus(''), 3000);
+      setTimeout(() => setImportStatus(''), 3000);
     } catch (e: any) {
-      setImportExportStatus(`Import failed: ${e.message}`);
-      setTimeout(() => setImportExportStatus(''), 5000);
+      setImportStatus(`Import failed: ${e.message}`);
+      setTimeout(() => setImportStatus(''), 5000);
     }
     event.target.value = '';
   };
@@ -418,9 +400,6 @@ export default function ToolsSandbox() {
               <button onClick={refreshSandboxFiles} disabled={isRefreshingFiles} style={{ border: '1px solid #e2e8f0', backgroundColor: '#fff', cursor: isRefreshingFiles ? 'not-allowed' : 'pointer', fontSize: '0.65rem', padding: '0.2rem 0.4rem', borderRadius: '4px', opacity: isRefreshingFiles ? 0.5 : 1 }}>
                 Refresh
               </button>
-              <button onClick={handleExport} style={{ border: '1px solid #e2e8f0', backgroundColor: '#fff', cursor: 'pointer', fontSize: '0.65rem', padding: '0.2rem 0.4rem', borderRadius: '4px' }}>
-                Export
-              </button>
               <label style={{ border: '1px solid #e2e8f0', backgroundColor: '#fff', cursor: 'pointer', fontSize: '0.65rem', padding: '0.2rem 0.4rem', borderRadius: '4px' }}>
                 Import
                 <input type="file" accept=".json" onChange={handleImport} style={{ display: 'none' }} />
@@ -428,9 +407,9 @@ export default function ToolsSandbox() {
             </div>
           </div>
           
-          {importExportStatus && (
-            <div style={{ padding: '0.5rem 1rem', fontSize: '0.7rem', color: importExportStatus.includes('failed') ? '#ef4444' : '#10b981', backgroundColor: '#fff', borderBottom: '1px solid #e2e8f0' }}>
-              {importExportStatus}
+          {importStatus && (
+            <div style={{ padding: '0.5rem 1rem', fontSize: '0.7rem', color: importStatus.includes('failed') ? '#ef4444' : '#10b981', backgroundColor: '#fff', borderBottom: '1px solid #e2e8f0' }}>
+              {importStatus}
             </div>
           )}
           
