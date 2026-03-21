@@ -1,8 +1,18 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useEffect, useRef, DragEvent } from 'react';
 import { toolDefinitions } from '@/lib/tools/definitions';
-import { listFiles, writeFile, deleteFile, readFile, importFromJson, FileEntry } from '@/lib/tools/file-storage';
+import { 
+  listFiles, 
+  deleteFile, 
+  readFile, 
+  uploadFile, 
+  getStorageUsage, 
+  canStoreFile, 
+  listExistingFiles, 
+  MAX_STORAGE_BYTES, 
+  FileEntry 
+} from '@/lib/tools/file-storage';
 import { searchInFiles } from '@/lib/tools/file-walker';
 
 type ExecutionStep = {
@@ -52,6 +62,17 @@ type ExecutionPipelineState = {
   active: boolean;
 };
 
+type UploadProgress = {
+  current: number;
+  total: number;
+  currentFile: string;
+};
+
+type OverwriteConfirmState = {
+  files: string[];
+  resolve: (confirm: boolean) => void;
+};
+
 const DEFAULT_CODE_TEMPLATE = `async function run({ args, helpers }) {
   const { now, sleep, log } = helpers;
   log("Initializing tool...");
@@ -64,16 +85,63 @@ const DEFAULT_CODE_TEMPLATE = `async function run({ args, helpers }) {
   };
 }`;
 
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+async function getFilesFromDataTransfer(items: DataTransferItemList, basePath: string = ''): Promise<File[]> {
+  const files: File[] = [];
+  
+  const processEntry = async (entry: FileSystemEntry, path: string): Promise<void> => {
+    if (entry.isFile) {
+      const fileEntry = entry as FileSystemFileEntry;
+      const file = await new Promise<File>((resolve, reject) => {
+        fileEntry.file(resolve, reject);
+      });
+      files.push(new File([file], file.name, { type: file.type, lastModified: file.lastModified }));
+    } else if (entry.isDirectory) {
+      const dirEntry = entry as FileSystemDirectoryEntry;
+      const reader = dirEntry.createReader();
+      const entries = await new Promise<FileSystemEntry[]>((resolve, reject) => {
+        reader.readEntries(resolve, reject);
+      });
+      const newPath = path ? `${path}/${entry.name}` : entry.name;
+      for (const childEntry of entries) {
+        await processEntry(childEntry, newPath);
+      }
+    }
+  };
+  
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (item.kind === 'file') {
+      const entry = item.webkitGetAsEntry();
+      if (entry) {
+        await processEntry(entry, basePath);
+      }
+    }
+  }
+  
+  return files;
+}
+
 export default function ToolsSandbox() {
-  // --- STATE ---
   const [selectedToolId, setSelectedToolId] = useState<string | null>(null);
   const [sandboxFiles, setSandboxFiles] = useState<FileEntry[]>([]);
-  const [uploadName, setUploadName] = useState('');
-  const [uploadContent, setUploadContent] = useState('');
   const [isRefreshingFiles, setIsRefreshingFiles] = useState(false);
-  const [importStatus, setImportStatus] = useState<string>('');
+  const [isDragging, setIsDragging] = useState(false);
+  const [storageUsed, setStorageUsed] = useState(0);
+  const [uploadStatus, setUploadStatus] = useState<string>('');
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
+  const [overwriteConfirm, setOverwriteConfirm] = useState<OverwriteConfirmState | null>(null);
 
-  // Initialize tool drafts from toolDefinitions
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const dropZoneRef = useRef<HTMLDivElement>(null);
+
   const [toolDrafts, setToolDrafts] = useState<Record<string, ToolDraft>>(() => {
     const initialDrafts: Record<string, ToolDraft> = {};
     toolDefinitions.forEach(def => {
@@ -88,24 +156,15 @@ export default function ToolsSandbox() {
     return initialDrafts;
   });
 
-  // --- FILE ACTIONS ---
   const refreshSandboxFiles = async () => {
     setIsRefreshingFiles(true);
     try {
       const files = await listFiles('');
       setSandboxFiles(files);
+      const usage = await getStorageUsage();
+      setStorageUsed(usage);
     } catch (e) { console.error(e); }
     finally { setIsRefreshingFiles(false); }
-  };
-
-  const handleUpload = async () => {
-    if (!uploadName) return;
-    try {
-      await writeFile(uploadName, uploadContent);
-      setUploadName('');
-      setUploadContent('');
-      refreshSandboxFiles();
-    } catch (e) { console.error(e); }
   };
 
   const handleDeleteFile = async (name: string) => {
@@ -115,24 +174,6 @@ export default function ToolsSandbox() {
     } catch (e) { console.error(e); }
   };
 
-  const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    
-    try {
-      const text = await file.text();
-      const result = await importFromJson(text);
-      setImportStatus(`Imported ${result.imported} files`);
-      refreshSandboxFiles();
-      setTimeout(() => setImportStatus(''), 3000);
-    } catch (e: any) {
-      setImportStatus(`Import failed: ${e.message}`);
-      setTimeout(() => setImportStatus(''), 5000);
-    }
-    event.target.value = '';
-  };
-
-  // Load files on init
   useEffect(() => {
     refreshSandboxFiles();
   }, []);
@@ -157,11 +198,9 @@ export default function ToolsSandbox() {
   const [expandedTraceIds, setExpandedTraceIds] = useState<Set<string>>(new Set());
   const [lastValidation, setLastValidation] = useState<Record<string, { ok: boolean, errors: string[] }>>({});
 
-  // --- DERIVED ---
   const selectedTool = selectedToolId ? toolDrafts[selectedToolId] : null;
   const selectedInvocation = selectedToolId ? invocationDrafts[selectedToolId] : null;
 
-  // --- ACTIONS ---
   const updateToolDraft = (id: string, updates: Partial<ToolDraft>) => {
     setToolDrafts(prev => ({
       ...prev,
@@ -357,7 +396,110 @@ export default function ToolsSandbox() {
     }
   };
 
-  // --- RENDER ---
+  const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!dropZoneRef.current?.contains(e.relatedTarget as Node)) {
+      setIsDragging(false);
+    }
+  };
+
+  const handleDrop = async (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const items = e.dataTransfer.items;
+    if (!items || items.length === 0) return;
+
+    try {
+      const files = await getFilesFromDataTransfer(items);
+      if (files.length > 0) {
+        await handleFiles(Array.from(files));
+      }
+    } catch (err) {
+      console.error('Drop error:', err);
+      setUploadStatus('Failed to process dropped files');
+      setTimeout(() => setUploadStatus(''), 3000);
+    }
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    
+    const fileArray = Array.from(files).map(f => {
+      return new File([f], f.name, { type: f.type, lastModified: f.lastModified });
+    });
+    
+    await handleFiles(fileArray);
+    e.target.value = '';
+  };
+
+  const handleFiles = async (files: File[]) => {
+    if (files.length === 0) return;
+
+    setUploadProgress({ current: 0, total: files.length, currentFile: '' });
+    setUploadStatus('Uploading...');
+
+    const filePaths = files.map(f => f.name);
+    const existingFiles = await listExistingFiles(filePaths);
+
+    if (existingFiles.length > 0) {
+      const confirmed = await new Promise<boolean>((resolve) => {
+        setOverwriteConfirm({
+          files: existingFiles,
+          resolve
+        });
+      });
+      setOverwriteConfirm(null);
+
+      if (!confirmed) {
+        setUploadProgress(null);
+        setUploadStatus('Upload cancelled');
+        setTimeout(() => setUploadStatus(''), 3000);
+        return;
+      }
+    }
+
+    let uploaded = 0;
+    let skipped = 0;
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      setUploadProgress({ current: i + 1, total: files.length, currentFile: file.name });
+
+      if (!(await canStoreFile(file.size))) {
+        setUploadStatus(`File "${file.name}" would exceed storage limit. Delete files or try a smaller file.`);
+        setTimeout(() => setUploadStatus(''), 5000);
+        break;
+      }
+
+      try {
+        await uploadFile(file);
+        uploaded++;
+      } catch (err) {
+        console.error(`Failed to upload ${file.name}:`, err);
+        skipped++;
+      }
+    }
+
+    setUploadProgress(null);
+    if (skipped > 0) {
+      setUploadStatus(`Uploaded ${uploaded} files, ${skipped} failed`);
+    } else {
+      setUploadStatus(`Uploaded ${uploaded} file${uploaded !== 1 ? 's' : ''}`);
+    }
+    setTimeout(() => setUploadStatus(''), 3000);
+    refreshSandboxFiles();
+  };
+
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 60px)', fontFamily: 'system-ui', backgroundColor: '#f8fafc' }}>
       
@@ -396,20 +538,29 @@ export default function ToolsSandbox() {
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', backgroundColor: '#fcfcfc' }}>
           <div style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800 }}>SANDBOX FILES</h2>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <button onClick={refreshSandboxFiles} disabled={isRefreshingFiles} style={{ border: '1px solid #e2e8f0', backgroundColor: '#fff', cursor: isRefreshingFiles ? 'not-allowed' : 'pointer', fontSize: '0.65rem', padding: '0.2rem 0.4rem', borderRadius: '4px', opacity: isRefreshingFiles ? 0.5 : 1 }}>
-                Refresh
-              </button>
-              <label style={{ border: '1px solid #e2e8f0', backgroundColor: '#fff', cursor: 'pointer', fontSize: '0.65rem', padding: '0.2rem 0.4rem', borderRadius: '4px' }}>
-                Import
-                <input type="file" accept=".json" onChange={handleImport} style={{ display: 'none' }} />
-              </label>
-            </div>
+            <button onClick={refreshSandboxFiles} disabled={isRefreshingFiles} style={{ border: '1px solid #e2e8f0', backgroundColor: '#fff', cursor: isRefreshingFiles ? 'not-allowed' : 'pointer', fontSize: '0.65rem', padding: '0.2rem 0.4rem', borderRadius: '4px', opacity: isRefreshingFiles ? 0.5 : 1 }}>
+              Refresh
+            </button>
           </div>
           
-          {importStatus && (
-            <div style={{ padding: '0.5rem 1rem', fontSize: '0.7rem', color: importStatus.includes('failed') ? '#ef4444' : '#10b981', backgroundColor: '#fff', borderBottom: '1px solid #e2e8f0' }}>
-              {importStatus}
+          <div style={{ padding: '0.5rem 1rem', fontSize: '0.65rem', color: '#64748b', backgroundColor: '#fff', borderBottom: '1px solid #e2e8f0' }}>
+            Storage: {formatBytes(storageUsed)} / {formatBytes(MAX_STORAGE_BYTES)}
+          </div>
+          
+          {uploadStatus && (
+            <div style={{ padding: '0.5rem 1rem', fontSize: '0.7rem', color: uploadStatus.includes('would exceed') || uploadStatus.includes('failed') ? '#ef4444' : '#10b981', backgroundColor: '#fff', borderBottom: '1px solid #e2e8f0' }}>
+              {uploadStatus}
+            </div>
+          )}
+          
+          {uploadProgress && (
+            <div style={{ padding: '0.5rem 1rem', backgroundColor: '#fff', borderBottom: '1px solid #e2e8f0' }}>
+              <div style={{ fontSize: '0.65rem', color: '#64748b', marginBottom: '0.25rem' }}>
+                Uploading {uploadProgress.current}/{uploadProgress.total}: {uploadProgress.currentFile}
+              </div>
+              <div style={{ height: '4px', backgroundColor: '#e2e8f0', borderRadius: '2px', overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${(uploadProgress.current / uploadProgress.total) * 100}%`, backgroundColor: '#3b82f6', transition: 'width 0.2s' }} />
+              </div>
             </div>
           )}
           
@@ -434,24 +585,38 @@ export default function ToolsSandbox() {
             </div>
           </div>
 
-          {/* UPLOAD UI */}
-          <div style={{ padding: '1rem', borderTop: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          {/* DROP ZONE */}
+          <div 
+            ref={dropZoneRef}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+            style={{ 
+              margin: '1rem',
+              padding: '1.5rem',
+              border: `2px dashed ${isDragging ? '#3b82f6' : '#e2e8f0'}`,
+              borderRadius: '8px',
+              backgroundColor: isDragging ? '#eff6ff' : '#fff',
+              cursor: 'pointer',
+              textAlign: 'center',
+              transition: 'all 0.2s'
+            }}
+          >
+            <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.5rem' }}>
+              Drop files here or click to browse
+            </div>
+            <div style={{ fontSize: '0.65rem', color: '#94a3b8' }}>
+              Supports files and folders
+            </div>
             <input 
-              type="text" 
-              placeholder="filename.txt" 
-              value={uploadName} 
-              onChange={e => setUploadName(e.target.value)} 
-              style={{ fontSize: '0.75rem', padding: '0.4rem', border: '1px solid #e2e8f0', borderRadius: '4px' }}
+              ref={fileInputRef}
+              type="file" 
+              multiple
+              {...({ webkitdirectory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
+              onChange={handleFileSelect}
+              style={{ display: 'none' }} 
             />
-            <textarea 
-              placeholder="Content..." 
-              value={uploadContent} 
-              onChange={e => setUploadContent(e.target.value)} 
-              style={{ fontSize: '0.75rem', padding: '0.4rem', border: '1px solid #e2e8f0', borderRadius: '4px', minHeight: '60px' }}
-            />
-            <button onClick={handleUpload} style={{ padding: '0.5rem', backgroundColor: '#3b82f6', color: '#fff', border: 'none', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}>
-              Create File
-            </button>
           </div>
         </div>
       </aside>
@@ -502,7 +667,7 @@ export default function ToolsSandbox() {
                     />
                     {lastValidation[selectedToolId!] && (
                       <div style={{ fontSize: '0.75rem', color: lastValidation[selectedToolId!].ok ? '#10b981' : '#ef4444' }}>
-                        {lastValidation[selectedToolId!].ok ? '✓ Valid' : `✗ Errors: ${lastValidation[selectedToolId!].errors.join(', ')}`}
+                        {lastValidation[selectedToolId!].ok ? 'Valid' : `Errors: ${lastValidation[selectedToolId!].errors.join(', ')}`}
                       </div>
                     )}
                   </div>
@@ -582,6 +747,57 @@ export default function ToolsSandbox() {
           </div>
         </div>
       </aside>
+
+      {/* OVERWRITE CONFIRMATION MODAL */}
+      {overwriteConfirm && (
+        <div 
+          style={{ 
+            position: 'fixed', 
+            inset: 0, 
+            backgroundColor: 'rgba(0,0,0,0.5)', 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center',
+            zIndex: 1000
+          }}
+          onClick={() => overwriteConfirm.resolve(false)}
+        >
+          <div 
+            style={{ 
+              backgroundColor: '#fff', 
+              padding: '1.5rem', 
+              borderRadius: '8px', 
+              maxWidth: '400px',
+              margin: '1rem'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '1rem', fontWeight: 700 }}>Overwrite existing files?</h3>
+            <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '1rem' }}>
+              The following files already exist in the sandbox:
+            </p>
+            <ul style={{ fontSize: '0.8rem', color: '#1e293b', marginBottom: '1rem', paddingLeft: '1.25rem' }}>
+              {overwriteConfirm.files.map((file, i) => (
+                <li key={i}>{file}</li>
+              ))}
+            </ul>
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+              <button 
+                onClick={() => overwriteConfirm.resolve(false)}
+                style={{ padding: '0.5rem 1rem', border: '1px solid #e2e8f0', backgroundColor: '#fff', borderRadius: '4px', cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={() => overwriteConfirm.resolve(true)}
+                style={{ padding: '0.5rem 1rem', border: 'none', backgroundColor: '#ef4444', color: '#fff', borderRadius: '4px', cursor: 'pointer' }}
+              >
+                Overwrite
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

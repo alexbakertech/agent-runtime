@@ -1,6 +1,8 @@
 const DB_NAME = 'agent-sandbox';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = 'files';
+
+export const MAX_STORAGE_BYTES = 50 * 1024 * 1024; // 50MB
 
 let db: IDBDatabase | null = null;
 
@@ -31,8 +33,35 @@ export type FileEntry = {
   name: string;
   type: 'file' | 'directory';
   content?: string;
+  isBase64?: boolean;
+  size?: number;
   lastModified: number;
 };
+
+export async function getStorageUsage(): Promise<number> {
+  const files = await getAllFiles();
+  return files.reduce((total, file) => total + (file.size || 0), 0);
+}
+
+export async function canStoreFile(fileSize: number): Promise<boolean> {
+  const currentUsage = await getStorageUsage();
+  return currentUsage + fileSize <= MAX_STORAGE_BYTES;
+}
+
+export async function fileExists(filePath: string): Promise<boolean> {
+  const file = await readFile(filePath);
+  return file !== null;
+}
+
+export async function listExistingFiles(filePaths: string[]): Promise<string[]> {
+  const existing: string[] = [];
+  for (const path of filePaths) {
+    if (await fileExists(path)) {
+      existing.push(path);
+    }
+  }
+  return existing;
+}
 
 export async function listFiles(dirPath: string = ''): Promise<FileEntry[]> {
   const database = await openDB();
@@ -68,7 +97,7 @@ export async function listFiles(dirPath: string = ''): Promise<FileEntry[]> {
   });
 }
 
-export async function writeFile(filePath: string, content: string): Promise<void> {
+export async function writeFile(filePath: string, content: string, options: { size?: number; isBase64?: boolean } = {}): Promise<void> {
   const database = await openDB();
   const normalizedPath = filePath.replace(/^\/|\/$/g, '');
   
@@ -92,6 +121,8 @@ export async function writeFile(filePath: string, content: string): Promise<void
       name: fileName,
       type: 'file',
       content,
+      size: options.size,
+      isBase64: options.isBase64,
       lastModified: Date.now()
     };
     
@@ -99,6 +130,57 @@ export async function writeFile(filePath: string, content: string): Promise<void
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve();
   });
+}
+
+export async function uploadFile(file: File, basePath: string = ''): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    
+    reader.onload = async () => {
+      try {
+        const normalizedPath = basePath 
+          ? `${basePath.replace(/^\/|\/$/g, '')}/${file.name}`.replace(/^\/+/, '')
+          : file.name;
+        
+        const content = reader.result as string;
+        
+        await writeFile(normalizedPath, content, {
+          size: file.size,
+          isBase64: false
+        });
+        
+        resolve();
+      } catch (error) {
+        reject(error);
+      }
+    };
+    
+    reader.onerror = () => reject(reader.error);
+    
+    if (isTextFile(file.name)) {
+      reader.readAsText(file);
+    } else {
+      reader.readAsDataURL(file);
+    }
+  });
+}
+
+function isTextFile(fileName: string): boolean {
+  const textExtensions = [
+    '.txt', '.md', '.json', '.js', '.jsx', '.ts', '.tsx',
+    '.html', '.css', '.scss', '.sass', '.less',
+    '.xml', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf',
+    '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat', '.cmd',
+    '.py', '.rb', '.php', '.pl', '.pm', '.lua', '.r', '.scala',
+    '.go', '.rs', '.java', '.kt', '.kts', '.cs', '.cpp', '.c', '.h',
+    '.swift', '.m', '.mm', '.sql', '.graphql', '.gql',
+    '.env', '.gitignore', '.dockerfile', '.editorconfig',
+    '.log', '.csv', '.tsv'
+  ];
+  
+  const lowerName = fileName.toLowerCase();
+  return textExtensions.some(ext => lowerName.endsWith(ext)) || 
+         !/\.[^.]+$/.test(fileName);
 }
 
 async function ensureDirectory(dirPath: string): Promise<void> {
@@ -202,49 +284,5 @@ export async function getAllFiles(): Promise<FileEntry[]> {
     
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve(request.result as FileEntry[]);
-  });
-}
-
-export async function exportAsJson(): Promise<string> {
-  const files = await getAllFiles();
-  return JSON.stringify({ files, exportedAt: new Date().toISOString() }, null, 2);
-}
-
-export async function importFromJson(jsonString: string): Promise<{ imported: number }> {
-  const database = await openDB();
-  const data = JSON.parse(jsonString);
-  
-  if (!data.files || !Array.isArray(data.files)) {
-    throw new Error('Invalid import file format');
-  }
-  
-  let count = 0;
-  return new Promise((resolve, reject) => {
-    const transaction = database.transaction(STORE_NAME, 'readwrite');
-    const store = transaction.objectStore(STORE_NAME);
-    
-    let pending = data.files.length;
-    
-    if (pending === 0) {
-      resolve({ imported: 0 });
-      return;
-    }
-    
-    for (const file of data.files) {
-      const request = store.put(file);
-      request.onsuccess = () => {
-        count++;
-        pending--;
-        if (pending === 0) {
-          resolve({ imported: count });
-        }
-      };
-      request.onerror = () => {
-        pending--;
-        if (pending === 0) {
-          resolve({ imported: count });
-        }
-      };
-    }
   });
 }
