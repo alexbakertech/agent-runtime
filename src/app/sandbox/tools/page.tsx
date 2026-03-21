@@ -151,8 +151,8 @@ export default function ToolsSandbox() {
   };
 
   // Load files on init
-  useMemo(() => {
-    if (typeof window !== 'undefined') refreshSandboxFiles();
+  useEffect(() => {
+    refreshSandboxFiles();
   }, []);
 
   const [invocationDrafts, setInvocationDrafts] = useState<Record<string, ToolInvocationDraft>>(() => {
