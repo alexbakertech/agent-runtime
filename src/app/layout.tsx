@@ -41,6 +41,9 @@ export default function RootLayout({
           <Link href="/context-engine" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
             Context Engine
           </Link>
+          <Link href="/sandbox/tools" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
+            Tools Sandbox
+          </Link>
           <Link href="/configure" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
             Configure & Test
           </Link>

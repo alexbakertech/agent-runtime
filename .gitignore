@@ -42,6 +42,9 @@ yarn-error.log*
 # Vercel
 .vercel
 
+# Sandbox
+src/lib/tools/sandbox-root/
+
 # testing
 /coverage
 

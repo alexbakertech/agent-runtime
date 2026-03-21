@@ -1,0 +1,557 @@
+'use client';
+
+import { useState, useMemo } from 'react';
+import { toolDefinitions } from '@/lib/tools/definitions';
+
+type ExecutionStep = {
+  label: string;
+  status: 'info' | 'success' | 'error';
+  details?: string;
+  timestamp: string;
+};
+
+type ToolDraft = {
+  name: string;
+  description: string;
+  schemaText: string;
+  enabled: boolean;
+  code: string;
+};
+
+type ToolInvocationDraft = {
+  argsText: string;
+};
+
+type ToolTraceEntry = {
+  id: string;
+  timestamp: string;
+  toolName: string;
+  argsText: string;
+  parsedArgs?: unknown;
+  validation: {
+    ok: boolean;
+    errors: string[];
+  };
+  result?: unknown;
+  error?: string;
+  steps: ExecutionStep[];
+};
+
+type ExecutionPipelineState = {
+  rawArgsText: string;
+  parsedArgs?: unknown;
+  parseError?: string;
+  validation: {
+    ok: boolean;
+    errors: string[];
+  };
+  result?: unknown;
+  error?: string;
+  active: boolean;
+};
+
+const DEFAULT_CODE_TEMPLATE = `async function run({ args, helpers }) {
+  const { now, sleep, log } = helpers;
+  log("Initializing tool...");
+  
+  // Example: fetch from built-in API if needed
+  // const res = await fetch('/api/tools/execute', { ... });
+  
+  await sleep(100); 
+  return { 
+    status: "success", 
+    received: args,
+    time: now() 
+  };
+}`;
+
+export default function ToolsSandbox() {
+  // --- STATE ---
+  const [selectedToolId, setSelectedToolId] = useState<string | null>(null);
+  const [sandboxFiles, setSandboxFiles] = useState<{ name: string, type: string }[]>([]);
+  const [uploadName, setUploadName] = useState('');
+  const [uploadContent, setUploadContent] = useState('');
+  const [isRefreshingFiles, setIsRefreshingFiles] = useState(false);
+
+  // Initialize tool drafts from toolDefinitions
+  const [toolDrafts, setToolDrafts] = useState<Record<string, ToolDraft>>(() => {
+    const initialDrafts: Record<string, ToolDraft> = {};
+    toolDefinitions.forEach(def => {
+      let initialCode = DEFAULT_CODE_TEMPLATE;
+      
+      if (['list_files', 'read_file', 'search_text', 'get_time'].includes(def.name)) {
+        initialCode = `async function run({ args, helpers }) {\n  const { log } = helpers;\n  log("Calling built-in API for ${def.name}...");\n\n  const res = await fetch('/api/tools/execute', {\n    method: 'POST',\n    headers: { 'Content-Type': 'application/json' },\n    body: JSON.stringify({ toolName: '${def.name}', args })\n  });\n\n  if (!res.ok) {\n    const err = await res.json();\n    throw new Error(err.error || "API Failure");\n  }\n\n  const data = await res.json();\n  return data.result;\n}`;
+      }
+
+      initialDrafts[def.name] = {
+        name: def.name,
+        description: def.description,
+        schemaText: JSON.stringify(def.parameters, null, 2),
+        enabled: true,
+        code: initialCode
+      };
+    });
+    return initialDrafts;
+  });
+
+  // --- FILE ACTIONS ---
+  const refreshSandboxFiles = async () => {
+    setIsRefreshingFiles(true);
+    try {
+      const res = await fetch('/api/sandbox/files');
+      const data = await res.json();
+      if (data.files) setSandboxFiles(data.files);
+    } catch (e) { console.error(e); }
+    finally { setIsRefreshingFiles(false); }
+  };
+
+  const handleUpload = async () => {
+    if (!uploadName) return;
+    try {
+      const res = await fetch('/api/sandbox/files', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: uploadName, content: uploadContent })
+      });
+      if (res.ok) {
+        setUploadName('');
+        setUploadContent('');
+        refreshSandboxFiles();
+      }
+    } catch (e) { console.error(e); }
+  };
+
+  const handleDeleteFile = async (name: string) => {
+    try {
+      const res = await fetch('/api/sandbox/files', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      });
+      if (res.ok) refreshSandboxFiles();
+    } catch (e) { console.error(e); }
+  };
+
+  // Load files on init
+  useMemo(() => {
+    if (typeof window !== 'undefined') refreshSandboxFiles();
+  }, []);
+
+  const [invocationDrafts, setInvocationDrafts] = useState<Record<string, ToolInvocationDraft>>(() => {
+    const initialInvocations: Record<string, ToolInvocationDraft> = {};
+    toolDefinitions.forEach(def => {
+      initialInvocations[def.name] = {
+        argsText: "{}",
+      };
+    });
+    return initialInvocations;
+  });
+
+  const [pipeline, setPipeline] = useState<ExecutionPipelineState>({
+    rawArgsText: "",
+    validation: { ok: true, errors: [] },
+    active: false
+  });
+
+  const [trace, setTrace] = useState<ToolTraceEntry[]>([]);
+  const [expandedTraceIds, setExpandedTraceIds] = useState<Set<string>>(new Set());
+  const [lastValidation, setLastValidation] = useState<Record<string, { ok: boolean, errors: string[] }>>({});
+
+  // --- DERIVED ---
+  const selectedTool = selectedToolId ? toolDrafts[selectedToolId] : null;
+  const selectedInvocation = selectedToolId ? invocationDrafts[selectedToolId] : null;
+
+  // --- ACTIONS ---
+  const updateToolDraft = (id: string, updates: Partial<ToolDraft>) => {
+    setToolDrafts(prev => ({
+      ...prev,
+      [id]: { ...prev[id], ...updates }
+    }));
+  };
+
+  const updateInvocationDraft = (id: string, updates: Partial<ToolInvocationDraft>) => {
+    setInvocationDrafts(prev => ({
+      ...prev,
+      [id]: { ...prev[id], ...updates }
+    }));
+  };
+
+  const resetToolDraft = (id: string) => {
+    const original = toolDefinitions.find(d => d.name === id);
+    if (original) {
+      setToolDrafts(prev => {
+        let initialCode = DEFAULT_CODE_TEMPLATE;
+        if (['list_files', 'read_file', 'search_text', 'get_time'].includes(original.name)) {
+          initialCode = `async function run({ args, helpers }) {\n  const { log } = helpers;\n  log("Calling built-in API for ${original.name}...");\n\n  const res = await fetch('/api/tools/execute', {\n    method: 'POST',\n    headers: { 'Content-Type': 'application/json' },\n    body: JSON.stringify({ toolName: '${original.name}', args })\n  });\n\n  if (!res.ok) {\n    const err = await res.json();\n    throw new Error(err.error || "API Failure");\n  }\n\n  const data = await res.json();\n  return data.result;\n}`;
+        }
+        return {
+          ...prev,
+          [id]: {
+            ...prev[id],
+            name: original.name,
+            description: original.description,
+            schemaText: JSON.stringify(original.parameters, null, 2),
+            code: initialCode
+          }
+        };
+      });
+    }
+  };
+
+  const validateArgs = (toolId: string) => {
+    const draft = toolDrafts[toolId];
+    const invocation = invocationDrafts[toolId];
+    let errors: string[] = [];
+    let parsedArgs = null;
+
+    try {
+      parsedArgs = JSON.parse(invocation.argsText);
+      const schema = JSON.parse(draft.schemaText);
+      if (schema.required) {
+        schema.required.forEach((req: string) => {
+          if (!(req in parsedArgs)) {
+            errors.push(`Missing required parameter: ${req}`);
+          }
+        });
+      }
+    } catch (e: any) {
+      errors.push(`JSON Parse Error: ${e.message}`);
+    }
+
+    return { ok: errors.length === 0, errors, parsedArgs };
+  };
+
+  const handleValidate = (toolId: string) => {
+    const result = validateArgs(toolId);
+    setLastValidation(prev => ({ ...prev, [toolId]: { ok: result.ok, errors: result.errors } }));
+  };
+
+  const handleExecute = async (toolId: string) => {
+    const draft = toolDrafts[toolId];
+    const invocation = invocationDrafts[toolId];
+    const steps: ExecutionStep[] = [];
+    const addStep = (label: string, status: 'info' | 'success' | 'error', details?: string) => {
+      steps.push({ label, status, details, timestamp: new Date().toLocaleTimeString() });
+    };
+
+    const pipelineState: ExecutionPipelineState = {
+      rawArgsText: invocation.argsText,
+      validation: { ok: true, errors: [] },
+      active: true
+    };
+
+    addStep("Initializing tool execution", "info");
+    addStep("Capturing raw input", "info");
+
+    addStep("Parsing arguments JSON", "info");
+    try {
+      pipelineState.parsedArgs = JSON.parse(invocation.argsText);
+      addStep("Arguments parsed successfully", "success");
+    } catch (e: any) {
+      pipelineState.parseError = e.message;
+      addStep("Failed to parse arguments", "error", e.message);
+    }
+
+    const { ok, errors, parsedArgs } = validateArgs(toolId);
+    pipelineState.validation = { ok, errors };
+    if (!ok) {
+      addStep("Argument validation failed", "error", errors.join(", "));
+    } else {
+      addStep("Argument validation successful", "success");
+    }
+
+    const entryId = Math.random().toString(36).substring(7);
+    const timestamp = new Date().toLocaleTimeString();
+
+    let result = null;
+    let error = null;
+
+    if (pipelineState.parseError || !ok) {
+      error = pipelineState.parseError || "Validation failed.";
+    } else {
+      addStep("Executing client action", "info");
+      try {
+        const helpers = {
+          now: () => new Date().toISOString(),
+          sleep: (ms: number) => new Promise(r => setTimeout(r, ms)),
+          log: (msg: string) => addStep(`[Action Log] ${msg}`, "info")
+        };
+        
+        const runner = new Function('args', 'helpers', `
+          ${draft.code}
+          return run({ args, helpers });
+        `);
+        
+        result = await runner(parsedArgs, helpers);
+        addStep("Execution complete", "success");
+      } catch (e: any) {
+        addStep("Runtime error", "error", e.message);
+        error = e.message;
+      }
+    }
+
+    pipelineState.result = result;
+    pipelineState.error = error;
+    setPipeline(pipelineState);
+
+    addStep("Cycle complete", error ? "error" : "success");
+
+    const newEntry: ToolTraceEntry = {
+      id: entryId,
+      timestamp,
+      toolName: toolId,
+      argsText: invocation.argsText,
+      parsedArgs,
+      validation: { ok, errors },
+      result,
+      error,
+      steps
+    };
+
+    setTrace(prev => [newEntry, ...prev]);
+    setExpandedTraceIds(prev => new Set(prev).add(entryId));
+  };
+
+  const toggleTraceExpansion = (id: string) => {
+    setExpandedTraceIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const clearTrace = () => setTrace([]);
+  const resetSandbox = () => { 
+    setSelectedToolId(null); 
+    setTrace([]); 
+    setPipeline({ rawArgsText: "", validation: { ok: true, errors: [] }, active: false }); 
+  };
+
+  const loadExampleArgs = (id: string) => {
+    const original = toolDefinitions.find(d => d.name === id);
+    if (original) {
+      const example: any = {};
+      if (original.parameters.properties) {
+        Object.keys(original.parameters.properties).forEach(key => {
+          const prop = original.parameters.properties[key];
+          if (prop.type === 'string') example[key] = "example_value";
+          if (prop.type === 'number') example[key] = 42;
+        });
+      }
+      updateInvocationDraft(id, { argsText: JSON.stringify(example, null, 2) });
+    }
+  };
+
+  // --- RENDER ---
+  return (
+    <div style={{ display: 'flex', height: 'calc(100vh - 60px)', fontFamily: 'system-ui', backgroundColor: '#f8fafc' }}>
+      
+      {/* LEFT PANEL - TOOL REGISTRY & SANDBOX FILES */}
+      <aside style={{ width: '320px', borderRight: '1px solid #e2e8f0', backgroundColor: '#fff', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', borderBottom: '1px solid #e2e8f0', overflow: 'hidden' }}>
+          <div style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0' }}>
+            <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800 }}>TOOLS</h2>
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {toolDefinitions.map(def => {
+                const isSelected = selectedToolId === def.name;
+                return (
+                  <div 
+                    key={def.name}
+                    onClick={() => setSelectedToolId(def.name)}
+                    style={{ 
+                      padding: '0.75rem', 
+                      borderRadius: '8px', 
+                      border: `1px solid ${isSelected ? '#3b82f6' : '#e2e8f0'}`,
+                      backgroundColor: isSelected ? '#eff6ff' : '#fff',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, fontSize: '0.85rem', color: isSelected ? '#1e40af' : '#1e293b' }}>{def.name}</div>
+                    <div style={{ fontSize: '0.7rem', color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{def.description}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* SANDBOX FILES MANAGER */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', backgroundColor: '#fcfcfc' }}>
+          <div style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800 }}>SANDBOX FILES</h2>
+            <button onClick={refreshSandboxFiles} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '0.8rem', opacity: isRefreshingFiles ? 0.5 : 1 }}>🔄</button>
+          </div>
+          
+          <div style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {sandboxFiles.map(file => (
+                <div key={file.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem', backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
+                  <div style={{ fontSize: '0.75rem', color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {file.type === 'directory' ? '📁' : '📄'} {file.name}
+                  </div>
+                  <button onClick={() => handleDeleteFile(file.name)} style={{ border: 'none', background: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '0.7rem' }}>Delete</button>
+                </div>
+              ))}
+              {sandboxFiles.length === 0 && (
+                <div style={{ padding: '1rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.75rem', border: '1px dashed #e2e8f0', borderRadius: '6px' }}>
+                  No files in sandbox.
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* UPLOAD UI */}
+          <div style={{ padding: '1rem', borderTop: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <input 
+              type="text" 
+              placeholder="filename.txt" 
+              value={uploadName} 
+              onChange={e => setUploadName(e.target.value)} 
+              style={{ fontSize: '0.75rem', padding: '0.4rem', border: '1px solid #e2e8f0', borderRadius: '4px' }}
+            />
+            <textarea 
+              placeholder="Content..." 
+              value={uploadContent} 
+              onChange={e => setUploadContent(e.target.value)} 
+              style={{ fontSize: '0.75rem', padding: '0.4rem', border: '1px solid #e2e8f0', borderRadius: '4px', minHeight: '60px' }}
+            />
+            <button onClick={handleUpload} style={{ padding: '0.5rem', backgroundColor: '#3b82f6', color: '#fff', border: 'none', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}>
+              Create File
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      {/* CENTER PANEL - TOOL WORKSPACE */}
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: '1px solid #e2e8f0', backgroundColor: '#fff', overflow: 'hidden' }}>
+        {selectedTool ? (
+          <>
+            <div style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fcfcfc' }}>
+              <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800 }}>{selectedToolId.toUpperCase()} WORKSPACE</h2>
+              <button onClick={() => resetToolDraft(selectedToolId!)} style={{ fontSize: '0.7rem', color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer' }}>Reset Tool</button>
+            </div>
+
+            <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+              
+              {/* 1. CODE EDITOR */}
+              <section>
+                <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.75rem' }}>1. CLIENT IMPLEMENTATION</h3>
+                <textarea 
+                  value={selectedTool.code} 
+                  onChange={(e) => updateToolDraft(selectedToolId!, { code: e.target.value })}
+                  style={{ width: '100%', padding: '1rem', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.8rem', fontFamily: 'monospace', minHeight: '250px', backgroundColor: '#1e293b', color: '#e2e8f0' }}
+                />
+                <div style={{ fontSize: '0.65rem', color: '#64748b', marginTop: '0.5rem' }}>Available: args, helpers (now, sleep, log)</div>
+              </section>
+
+              {/* 2. INVOCATION SIMULATOR */}
+              <section>
+                <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.75rem' }}>2. INVOCATION SIMULATOR</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <label style={{ fontSize: '0.65rem', fontWeight: 700, color: '#64748b' }}>ARGUMENTS (JSON)</label>
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <button onClick={() => loadExampleArgs(selectedToolId!)} style={{ fontSize: '0.65rem', padding: '0.1rem 0.3rem', border: '1px solid #e2e8f0', background: '#fff', borderRadius: '4px', cursor: 'pointer' }}>Example</button>
+                        <button onClick={() => updateInvocationDraft(selectedToolId!, { argsText: "{}" })} style={{ fontSize: '0.65rem', padding: '0.1rem 0.3rem', border: '1px solid #e2e8f0', background: '#fff', borderRadius: '4px', cursor: 'pointer' }}>Empty</button>
+                      </div>
+                    </div>
+                    <textarea 
+                      value={selectedInvocation?.argsText} 
+                      onChange={(e) => { 
+                        updateInvocationDraft(selectedToolId!, { argsText: e.target.value }); 
+                        if (lastValidation[selectedToolId!]) {
+                          setLastValidation(prev => { const n = {...prev}; delete n[selectedToolId!]; return n; });
+                        }
+                      }}
+                      style={{ padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '0.8rem', fontFamily: 'monospace', minHeight: '100px' }}
+                    />
+                    {lastValidation[selectedToolId!] && (
+                      <div style={{ fontSize: '0.75rem', color: lastValidation[selectedToolId!].ok ? '#10b981' : '#ef4444' }}>
+                        {lastValidation[selectedToolId!].ok ? '✓ Valid' : `✗ Errors: ${lastValidation[selectedToolId!].errors.join(', ')}`}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: '1rem' }}>
+                    <button onClick={() => handleValidate(selectedToolId!)} style={{ flex: 1, padding: '0.75rem', border: '1px solid #e2e8f0', backgroundColor: '#fff', color: '#1e293b', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}>VALIDATE</button>
+                    <button onClick={() => handleExecute(selectedToolId!)} style={{ flex: 2, padding: '0.75rem', backgroundColor: '#0f172a', color: '#fff', borderRadius: '8px', fontWeight: 700, cursor: 'pointer', border: 'none' }}>RUN ACTION</button>
+                  </div>
+                </div>
+              </section>
+
+              {/* 3. PIPELINE & RESULT */}
+              <section style={{ opacity: pipeline.active ? 1 : 0.5 }}>
+                <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.75rem' }}>3. EXECUTION PIPELINE</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', backgroundColor: '#f1f5f9', padding: '1rem', borderRadius: '8px' }}>
+                  {[
+                    { label: "RAW INPUT", value: pipeline.rawArgsText },
+                    { label: "VALIDATION", value: pipeline.validation.ok ? "PASS" : "FAIL", error: pipeline.validation.errors.join(', ') },
+                    { label: "RESULT", value: pipeline.result, error: pipeline.error, isJson: true }
+                  ].map((s, i) => (
+                    <div key={i} style={{ padding: '0.5rem', backgroundColor: '#fff', borderRadius: '4px', borderLeft: `3px solid ${s.error ? '#ef4444' : (s.value !== undefined ? '#10b981' : '#cbd5e1')}` }}>
+                      <div style={{ fontSize: '0.6rem', fontWeight: 800, color: '#94a3b8' }}>{s.label}</div>
+                      <div style={{ fontSize: '0.75rem' }}>
+                        {s.error ? <span style={{ color: '#ef4444' }}>{s.error}</span> : (s.isJson ? <pre style={{ margin: 0, fontSize: '0.7rem' }}>{JSON.stringify(s.value, null, 2)}</pre> : String(s.value ?? '—'))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              {/* 4. DEFINITION (REDUCED) */}
+              <section>
+                <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.75rem' }}>4. SCHEMA DEFINITION</h3>
+                <textarea 
+                  value={selectedTool.schemaText} 
+                  onChange={(e) => updateToolDraft(selectedToolId!, { schemaText: e.target.value })}
+                  style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '0.75rem', fontFamily: 'monospace', minHeight: '100px' }}
+                />
+              </section>
+
+            </div>
+          </>
+        ) : (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>Select a tool to begin.</div>
+        )}
+      </main>
+
+      {/* RIGHT PANEL - TRACE LOG */}
+      <aside style={{ width: '350px', backgroundColor: '#f8fafc', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', backgroundColor: '#fff' }}>
+          <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800 }}>TRACE</h2>
+          <button onClick={clearTrace} style={{ fontSize: '0.65rem', border: 'none', background: 'none', color: '#94a3b8', cursor: 'pointer' }}>Clear</button>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {trace.map(entry => (
+              <div key={entry.id} style={{ backgroundColor: '#fff', borderRadius: '8px', border: `1px solid ${entry.error ? '#fecaca' : '#e2e8f0'}`, overflow: 'hidden' }}>
+                <div onClick={() => toggleTraceExpansion(entry.id)} style={{ padding: '0.75rem', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700 }}>{entry.toolName}</span>
+                  <span style={{ fontSize: '0.65rem', color: '#94a3b8' }}>{entry.timestamp}</span>
+                </div>
+                {expandedTraceIds.has(entry.id) && (
+                  <div style={{ padding: '0.75rem', borderTop: '1px solid #f8fafc', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {entry.steps.map((s, idx) => (
+                      <div key={idx} style={{ fontSize: '0.65rem', color: s.status === 'error' ? '#ef4444' : (s.status === 'success' ? '#10b981' : '#64748b') }}>
+                        <span style={{ fontWeight: 600 }}>{s.label}</span>
+                        {s.details && <div style={{ opacity: 0.8, fontFamily: 'monospace' }}>{s.details}</div>}
+                      </div>
+                    ))}
+                    <div style={{ marginTop: '0.5rem' }}>
+                      <div style={{ fontSize: '0.6rem', fontWeight: 800, color: '#94a3b8' }}>RESULT</div>
+                      <pre style={{ margin: 0, fontSize: '0.7rem', color: entry.error ? '#991b1b' : '#334155' }}>{entry.error || JSON.stringify(entry.result, null, 2)}</pre>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </aside>
+
+    </div>
+  );
+}

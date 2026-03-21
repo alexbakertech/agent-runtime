@@ -1,18 +1,12 @@
 import fs from 'fs/promises';
-import path from 'path';
+import { resolveSandboxPath } from './sandbox-utils';
 
 /**
  * Tool: read_file
  * Reads and returns the content of a specified file.
  */
 export async function readFile(args: { filePath: string }) {
-  const rootDir = process.cwd();
-  const targetPath = path.resolve(rootDir, args.filePath);
-
-  // Security check: ensure targetPath is within rootDir
-  if (!targetPath.startsWith(rootDir)) {
-    throw new Error('Access denied: path is outside the project root.');
-  }
+  const targetPath = await resolveSandboxPath(args.filePath);
 
   try {
     const stats = await fs.stat(targetPath);
@@ -31,18 +25,3 @@ export async function readFile(args: { filePath: string }) {
     throw new Error(`Failed to read file: ${error.message}`);
   }
 }
-
-export const readFileDefinition = {
-  name: 'read_file',
-  description: 'Reads and returns the content of a specified file.',
-  parameters: {
-    type: 'object',
-    properties: {
-      filePath: {
-        type: 'string',
-        description: 'The file path to read (relative to project root).',
-      },
-    },
-    required: ['filePath'],
-  },
-};

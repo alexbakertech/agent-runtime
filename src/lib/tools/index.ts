@@ -1,7 +1,15 @@
-import { getTime, getTimeDefinition } from './get_time';
-import { listFiles, listFilesDefinition } from './list_files';
-import { readFile, readFileDefinition } from './read_file';
-import { searchText, searchTextDefinition } from './search_text';
+import { getTime } from './get_time';
+import { listFiles } from './list_files';
+import { readFile } from './read_file';
+import { searchText } from './search_text';
+import {
+  getTimeDefinition,
+  listFilesDefinition,
+  readFileDefinition,
+  searchTextDefinition,
+  toolDefinitions as _toolDefinitions,
+  ToolName
+} from './definitions';
 
 export const tools = {
   get_time: {
@@ -22,11 +30,10 @@ export const tools = {
   },
 };
 
-export const toolDefinitions = Object.values(tools).map(tool => tool.definition);
-
-export type ToolName = keyof typeof tools;
+export const toolDefinitions = _toolDefinitions;
 
 export async function executeTool(name: ToolName, args: any) {
+  // @ts-ignore
   const tool = tools[name];
   if (!tool) {
     throw new Error(`Tool not found: ${name}`);
