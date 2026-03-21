@@ -1,129 +1,179 @@
 # Agent Runtime
 
-> A transparent runtime for tool-augmented LLM agents, designed for iterative development and system-level control.
+> A transparent runtime and debugging environment for tool-augmented LLM agents, designed for iterative development and system-level control.
 
 ## Status
 
-**Planning — v0.1 Design Phase**
+**Active Development — Early Runtime + Sandbox Extraction Phase**
 
-This repository is currently focused on defining a minimal, deterministic agent harness before implementation begins.
-
-The goal of this phase is to establish:
-- a clear execution model
-- strict system boundaries
-- a small, well-defined tool surface
-- observable and debuggable behavior
+Core runtime features are implemented and are being refactored into modular sandboxes for improved transparency, debuggability, and composability.
+This project is transitioning from a unified runtime interface into a system of focused, reusable components.
 
 ## Objective
 
-Design and implement a **local-first agent runtime** that:
+Design and implement a **local-first agent runtime and development environment** that:
 
 - operates through a controlled execution loop  
-- allows a model to request tools when needed  
-- enforces validation and execution boundaries  
-- produces fully inspectable execution traces  
+- enables explicit tool interaction and validation  
+- provides full visibility into prompt construction and execution  
+- supports step-by-step inspection and intervention  
+- exposes internal state for debugging and refinement  
 
-This project prioritizes **control and transparency** over abstraction.
+This project prioritizes **control, transparency, and inspectability** over abstraction.
 
-## v0.1 Scope
+## Current Scope (v0.x)
 
 ### Included
 
 - single-agent execution loop  
-- local model integration (e.g., `llama.cpp`)  
-- small, read-only toolset  
+- local and OpenAI-compatible model integration  
+- context inspection and modification  
+- runtime step-through execution  
 - structured run state  
-- full trace logging  
-- validation and stop logic  
+- execution trace visibility  
+- integrated UI for chat and runtime interaction  
 
-### Explicitly Excluded
+### Explicitly Excluded (for now)
 
-- long-term memory  
+- long-term memory systems  
 - vector search / embeddings  
-- subagents or planners  
-- external APIs  
-- write/delete operations  
-- autonomous background execution  
+- multi-agent orchestration  
+- persistent autonomous execution  
+- production deployment infrastructure  
 
-## Architecture Plan (v0.1)
+## Architecture Direction
 
-The system will be implemented as a small set of explicit components:
+The system is being decomposed into focused, composable sandboxes:
 
-- /runtime # agent loop and orchestration
-- /adapters # model interface (llama.cpp)
-- /tools # tool definitions
-- /executors # tool implementations
-- /state # run context tracking
-- /logging # execution trace
-- /validation # guardrails and checks
+- `/sandbox/context`  
+  Prompt construction, message control, and context inspection  
 
-Each component will be implemented independently to maintain clarity and control.
+- `/sandbox/tools`  
+  Tool definition, validation, and execution simulation  
 
-## Execution Model (Planned)
+- `/sandbox/runtime`  
+  Step-by-step agent execution loop and trace inspection  
 
-The runtime will operate as a bounded loop:
+- `/studio`  
+  Unified workspace for composing and running agent configurations  
+
+These sandboxes isolate core concerns and will be composed into a cohesive development environment.
+
+## Execution Model
+
+The runtime operates as a bounded, inspectable loop:
 
 1. Receive user input  
-2. Send context + tool definitions to the model  
-3. Inspect model output  
-4. If a tool is requested:
+2. Compile context (system prompt + messages + tool definitions)  
+3. Send request to model  
+4. Inspect model output  
+5. If a tool is requested:
    - validate the request  
    - execute the tool  
    - append result to state  
-5. Repeat until:
+6. Repeat until:
    - a final answer is produced, or  
    - a termination condition is met  
 
-## Initial Tool Set (Planned)
+This execution flow is exposed directly in the Runtime Sandbox, where each step can be observed, paused, and modified.
 
-The first version will include a minimal, deterministic set of tools:
+## Context Model
+
+The system distinguishes between:
+
+- **Transcript** — the canonical record of actual messages  
+- **Runtime Context** — the editable message set used for the next execution  
+- **Effective Context** — the final compiled input sent to the model  
+
+This separation enables controlled experimentation without mutating source history.
+
+## Tools
+
+The initial toolset is intentionally minimal and deterministic:
 
 - `list_files`  
 - `read_file`  
 - `search_text`  
 - `get_time`  
 
-All tools will be:
+All tools are:
+
 - read-only  
 - scoped  
 - predictable in output  
 
-## Execution Constraints (v0.1)
+The Tools Sandbox provides a dedicated interface for inspecting, defining, and testing tool behavior independently of the runtime loop.
+
+## Execution Constraints
 
 - maximum **5–8 steps per run**  
 - strict validation of all tool calls  
 - bounded tool output  
 - no background or recursive execution  
 
+These constraints enforce predictable and debuggable behavior.
+
 ## Success Criteria
 
-v0.1 will be considered complete when the runtime can:
+The current phase is successful when the system can:
 
 - correctly select and invoke tools  
 - chain simple tool calls when required  
 - avoid hallucinating data not retrieved  
 - terminate cleanly without unnecessary looping  
 - produce a clear, inspectable execution trace  
+- expose the effective context sent to the model  
+- allow controlled modification of runtime state for testing  
 
 ## Development Approach
 
-This project will be developed incrementally:
+Development follows an iterative, systems-oriented approach:
 
 - define → implement → observe → refine  
 
-The focus is on building a system that is:
-- predictable  
-- debuggable  
-- extensible through iteration  
+Each component is designed to be:
+
+- explicit in behavior  
+- observable in execution  
+- modular in structure  
+- reusable across workflows  
+
+The system evolves by increasing visibility and control before increasing capability.
+
+## Product Direction
+
+Agent Runtime is evolving into a **development environment for building and debugging agent systems**.
+
+The focus is not on abstracting complexity away, but on:
+
+- exposing internal state  
+- enabling controlled experimentation  
+- providing deterministic execution surfaces  
+- supporting iterative refinement of agent behavior  
+
+This positions the project as a foundation for higher-level agent systems and workflows.
+
+## Repository Structure (Planned)
+
+- `/sandbox`
+- `/context`
+- `/tools`
+- `/runtime`
+- `/studio`
+- `/lib`
+- `/runtime-core`
 
 ## Repository Strategy
 
 - `dev` — active development  
 - `main` — curated, stable snapshots  
 
+Future modules may be extracted into reusable libraries as the architecture stabilizes.
+
 ## License
 
-This project is licensed under the Apache License, Version 2.0 - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache License, Version 2.0.  
+See the [LICENSE](LICENSE) file for details.
 
 ## Author
 
