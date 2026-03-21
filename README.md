@@ -4,10 +4,9 @@
 
 ## Status
 
-**Active Development — Early Runtime + Sandbox Extraction Phase**
+**Active Development — Implementation Phase**
 
-Core runtime features are implemented and are being refactored into modular sandboxes for improved transparency, debuggability, and composability.
-This project is transitioning from a unified runtime interface into a system of focused, reusable components.
+Core runtime features are implemented as a Next.js application at the repository root. The project is focused on providing a minimal, deterministic agent harness with strict system boundaries and observable behavior.
 
 ## Objective
 
@@ -21,6 +20,27 @@ Design and implement a **local-first agent runtime and development environment**
 
 This project prioritizes **control, transparency, and inspectability** over abstraction.
 
+## Getting Started
+
+### Prerequisites
+
+- Node.js (v18 or higher)
+- npm or yarn
+
+### Installation
+
+```bash
+npm install
+```
+
+### Running the App
+
+```bash
+npm run dev
+```
+
+The application will be available at [http://localhost:3000](http://localhost:3000).
+
 ## Current Scope (v0.x)
 
 ### Included
@@ -32,6 +52,7 @@ This project prioritizes **control, transparency, and inspectability** over abst
 - structured run state  
 - execution trace visibility  
 - integrated UI for chat and runtime interaction  
+- **Initial Toolset:** `list_files`, `read_file`, `search_text`, `get_time`
 
 ### Explicitly Excluded (for now)
 
@@ -43,21 +64,19 @@ This project prioritizes **control, transparency, and inspectability** over abst
 
 ## Architecture Direction
 
-The system is being decomposed into focused, composable sandboxes:
+The system is organized into focused, composable components:
 
-- `/sandbox/context`  
-  Prompt construction, message control, and context inspection  
+- `/src/app/api`  
+  API routes for chat, model selection, and connection testing.
 
-- `/sandbox/tools`  
-  Tool definition, validation, and execution simulation  
+- `/src/lib/tools`  
+  Tool definition, validation, and implementation.
 
-- `/sandbox/runtime`  
-  Step-by-step agent execution loop and trace inspection  
+- `/src/app/context-engine`  
+  Context management and inspection interface.
 
-- `/studio`  
-  Unified workspace for composing and running agent configurations  
-
-These sandboxes isolate core concerns and will be composed into a cohesive development environment.
+- `/src/app/configure`  
+  System configuration and setup.
 
 ## Execution Model
 
@@ -75,100 +94,13 @@ The runtime operates as a bounded, inspectable loop:
    - a final answer is produced, or  
    - a termination condition is met  
 
-This execution flow is exposed directly in the Runtime Sandbox, where each step can be observed, paused, and modified.
+## Repository Structure
 
-## Context Model
-
-The system distinguishes between:
-
-- **Transcript** — the canonical record of actual messages  
-- **Runtime Context** — the editable message set used for the next execution  
-- **Effective Context** — the final compiled input sent to the model  
-
-This separation enables controlled experimentation without mutating source history.
-
-## Tools
-
-The initial toolset is intentionally minimal and deterministic:
-
-- `list_files`  
-- `read_file`  
-- `search_text`  
-- `get_time`  
-
-All tools are:
-
-- read-only  
-- scoped  
-- predictable in output  
-
-The Tools Sandbox provides a dedicated interface for inspecting, defining, and testing tool behavior independently of the runtime loop.
-
-## Execution Constraints
-
-- maximum **5–8 steps per run**  
-- strict validation of all tool calls  
-- bounded tool output  
-- no background or recursive execution  
-
-These constraints enforce predictable and debuggable behavior.
-
-## Success Criteria
-
-The current phase is successful when the system can:
-
-- correctly select and invoke tools  
-- chain simple tool calls when required  
-- avoid hallucinating data not retrieved  
-- terminate cleanly without unnecessary looping  
-- produce a clear, inspectable execution trace  
-- expose the effective context sent to the model  
-- allow controlled modification of runtime state for testing  
-
-## Development Approach
-
-Development follows an iterative, systems-oriented approach:
-
-- define → implement → observe → refine  
-
-Each component is designed to be:
-
-- explicit in behavior  
-- observable in execution  
-- modular in structure  
-- reusable across workflows  
-
-The system evolves by increasing visibility and control before increasing capability.
-
-## Product Direction
-
-Agent Runtime is evolving into a **development environment for building and debugging agent systems**.
-
-The focus is not on abstracting complexity away, but on:
-
-- exposing internal state  
-- enabling controlled experimentation  
-- providing deterministic execution surfaces  
-- supporting iterative refinement of agent behavior  
-
-This positions the project as a foundation for higher-level agent systems and workflows.
-
-## Repository Structure (Planned)
-
-- `/sandbox`
-- `/context`
-- `/tools`
-- `/runtime`
-- `/studio`
-- `/lib`
-- `/runtime-core`
-
-## Repository Strategy
-
-- `dev` — active development  
-- `main` — curated, stable snapshots  
-
-Future modules may be extracted into reusable libraries as the architecture stabilizes.
+- `/src/app`: Next.js application pages and API routes.
+- `/src/lib`: Shared libraries and core logic.
+- `/src/lib/tools`: Tool implementation modules.
+- `/public`: Static assets.
+- `package.json`: Project dependencies and scripts.
 
 ## License
 
