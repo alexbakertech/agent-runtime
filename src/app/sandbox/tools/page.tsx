@@ -1,7 +1,9 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { toolDefinitions } from '@/lib/tools/definitions';
+import { listFiles, writeFile, deleteFile, readFile, exportAsJson, importFromJson, FileEntry } from '@/lib/tools/file-storage';
+import { searchInFiles } from '@/lib/tools/file-walker';
 
 type ExecutionStep = {
   label: string;
@@ -54,9 +56,6 @@ const DEFAULT_CODE_TEMPLATE = `async function run({ args, helpers }) {
   const { now, sleep, log } = helpers;
   log("Initializing tool...");
   
-  // Example: fetch from built-in API if needed
-  // const res = await fetch('/api/tools/execute', { ... });
-  
   await sleep(100); 
   return { 
     status: "success", 
@@ -68,27 +67,22 @@ const DEFAULT_CODE_TEMPLATE = `async function run({ args, helpers }) {
 export default function ToolsSandbox() {
   // --- STATE ---
   const [selectedToolId, setSelectedToolId] = useState<string | null>(null);
-  const [sandboxFiles, setSandboxFiles] = useState<{ name: string, type: string }[]>([]);
+  const [sandboxFiles, setSandboxFiles] = useState<FileEntry[]>([]);
   const [uploadName, setUploadName] = useState('');
   const [uploadContent, setUploadContent] = useState('');
   const [isRefreshingFiles, setIsRefreshingFiles] = useState(false);
+  const [importExportStatus, setImportExportStatus] = useState<string>('');
 
   // Initialize tool drafts from toolDefinitions
   const [toolDrafts, setToolDrafts] = useState<Record<string, ToolDraft>>(() => {
     const initialDrafts: Record<string, ToolDraft> = {};
     toolDefinitions.forEach(def => {
-      let initialCode = DEFAULT_CODE_TEMPLATE;
-      
-      if (['list_files', 'read_file', 'search_text', 'get_time'].includes(def.name)) {
-        initialCode = `async function run({ args, helpers }) {\n  const { log } = helpers;\n  log("Calling built-in API for ${def.name}...");\n\n  const res = await fetch('/api/tools/execute', {\n    method: 'POST',\n    headers: { 'Content-Type': 'application/json' },\n    body: JSON.stringify({ toolName: '${def.name}', args })\n  });\n\n  if (!res.ok) {\n    const err = await res.json();\n    throw new Error(err.error || "API Failure");\n  }\n\n  const data = await res.json();\n  return data.result;\n}`;
-      }
-
       initialDrafts[def.name] = {
         name: def.name,
         description: def.description,
         schemaText: JSON.stringify(def.parameters, null, 2),
         enabled: true,
-        code: initialCode
+        code: DEFAULT_CODE_TEMPLATE
       };
     });
     return initialDrafts;
@@ -98,9 +92,8 @@ export default function ToolsSandbox() {
   const refreshSandboxFiles = async () => {
     setIsRefreshingFiles(true);
     try {
-      const res = await fetch('/api/sandbox/files');
-      const data = await res.json();
-      if (data.files) setSandboxFiles(data.files);
+      const files = await listFiles('');
+      setSandboxFiles(files);
     } catch (e) { console.error(e); }
     finally { setIsRefreshingFiles(false); }
   };
@@ -108,28 +101,53 @@ export default function ToolsSandbox() {
   const handleUpload = async () => {
     if (!uploadName) return;
     try {
-      const res = await fetch('/api/sandbox/files', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: uploadName, content: uploadContent })
-      });
-      if (res.ok) {
-        setUploadName('');
-        setUploadContent('');
-        refreshSandboxFiles();
-      }
+      await writeFile(uploadName, uploadContent);
+      setUploadName('');
+      setUploadContent('');
+      refreshSandboxFiles();
     } catch (e) { console.error(e); }
   };
 
   const handleDeleteFile = async (name: string) => {
     try {
-      const res = await fetch('/api/sandbox/files', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name })
-      });
-      if (res.ok) refreshSandboxFiles();
+      await deleteFile(name);
+      refreshSandboxFiles();
     } catch (e) { console.error(e); }
+  };
+
+  const handleExport = async () => {
+    try {
+      const json = await exportAsJson();
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `sandbox-export-${new Date().toISOString().split('T')[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setImportExportStatus('Exported successfully');
+      setTimeout(() => setImportExportStatus(''), 3000);
+    } catch (e: any) { 
+      setImportExportStatus(`Export failed: ${e.message}`);
+      setTimeout(() => setImportExportStatus(''), 5000);
+    }
+  };
+
+  const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    
+    try {
+      const text = await file.text();
+      const result = await importFromJson(text);
+      setImportExportStatus(`Imported ${result.imported} files`);
+      refreshSandboxFiles();
+      setTimeout(() => setImportExportStatus(''), 3000);
+    } catch (e: any) {
+      setImportExportStatus(`Import failed: ${e.message}`);
+      setTimeout(() => setImportExportStatus(''), 5000);
+    }
+    event.target.value = '';
   };
 
   // Load files on init
@@ -179,22 +197,16 @@ export default function ToolsSandbox() {
   const resetToolDraft = (id: string) => {
     const original = toolDefinitions.find(d => d.name === id);
     if (original) {
-      setToolDrafts(prev => {
-        let initialCode = DEFAULT_CODE_TEMPLATE;
-        if (['list_files', 'read_file', 'search_text', 'get_time'].includes(original.name)) {
-          initialCode = `async function run({ args, helpers }) {\n  const { log } = helpers;\n  log("Calling built-in API for ${original.name}...");\n\n  const res = await fetch('/api/tools/execute', {\n    method: 'POST',\n    headers: { 'Content-Type': 'application/json' },\n    body: JSON.stringify({ toolName: '${original.name}', args })\n  });\n\n  if (!res.ok) {\n    const err = await res.json();\n    throw new Error(err.error || "API Failure");\n  }\n\n  const data = await res.json();\n  return data.result;\n}`;
+      setToolDrafts(prev => ({
+        ...prev,
+        [id]: {
+          ...prev[id],
+          name: original.name,
+          description: original.description,
+          schemaText: JSON.stringify(original.parameters, null, 2),
+          code: DEFAULT_CODE_TEMPLATE
         }
-        return {
-          ...prev,
-          [id]: {
-            ...prev[id],
-            name: original.name,
-            description: original.description,
-            schemaText: JSON.stringify(original.parameters, null, 2),
-            code: initialCode
-          }
-        };
-      });
+      }));
     }
   };
 
@@ -202,7 +214,7 @@ export default function ToolsSandbox() {
     const draft = toolDrafts[toolId];
     const invocation = invocationDrafts[toolId];
     let errors: string[] = [];
-    let parsedArgs = null;
+    let parsedArgs: any = null;
 
     try {
       parsedArgs = JSON.parse(invocation.argsText);
@@ -224,6 +236,22 @@ export default function ToolsSandbox() {
   const handleValidate = (toolId: string) => {
     const result = validateArgs(toolId);
     setLastValidation(prev => ({ ...prev, [toolId]: { ok: result.ok, errors: result.errors } }));
+  };
+
+  const builtInTools: Record<string, (args: any) => Promise<any>> = {
+    get_time: async () => new Date().toISOString(),
+    list_files: async (args: { dirPath?: string }) => {
+      const files = await listFiles(args.dirPath || '');
+      return files.map(f => ({ name: f.name, type: f.type }));
+    },
+    read_file: async (args: { filePath: string }) => {
+      const file = await readFile(args.filePath);
+      if (!file) throw new Error('File not found');
+      return { name: file.name, content: file.content };
+    },
+    search_text: async (args: { pattern: string; dirPath?: string }) => {
+      return searchInFiles(args.pattern, { dirPath: args.dirPath });
+    },
   };
 
   const handleExecute = async (toolId: string) => {
@@ -276,13 +304,17 @@ export default function ToolsSandbox() {
           sleep: (ms: number) => new Promise(r => setTimeout(r, ms)),
           log: (msg: string) => addStep(`[Action Log] ${msg}`, "info")
         };
-        
-        const runner = new Function('args', 'helpers', `
-          ${draft.code}
-          return run({ args, helpers });
-        `);
-        
-        result = await runner(parsedArgs, helpers);
+
+        if (builtInTools[toolId]) {
+          addStep(`Running built-in: ${toolId}`, "info");
+          result = await builtInTools[toolId](parsedArgs);
+        } else {
+          const runner = new Function('args', 'helpers', `
+            ${draft.code}
+            return run({ args, helpers });
+          `);
+          result = await runner(parsedArgs, helpers);
+        }
         addStep("Execution complete", "success");
       } catch (e: any) {
         addStep("Runtime error", "error", e.message);
@@ -331,10 +363,10 @@ export default function ToolsSandbox() {
   const loadExampleArgs = (id: string) => {
     const original = toolDefinitions.find(d => d.name === id);
     if (original) {
-      const example: any = {};
+      const example: Record<string, any> = {};
       if (original.parameters.properties) {
-        Object.keys(original.parameters.properties).forEach(key => {
-          const prop = original.parameters.properties[key];
+        Object.keys(original.parameters.properties).forEach((key: string) => {
+          const prop = (original.parameters.properties as Record<string, any>)[key];
           if (prop.type === 'string') example[key] = "example_value";
           if (prop.type === 'number') example[key] = 42;
         });
@@ -382,8 +414,21 @@ export default function ToolsSandbox() {
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', backgroundColor: '#fcfcfc' }}>
           <div style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800 }}>SANDBOX FILES</h2>
-            <button onClick={refreshSandboxFiles} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '0.8rem', opacity: isRefreshingFiles ? 0.5 : 1 }}>🔄</button>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button onClick={handleExport} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '0.7rem' }}>📤</button>
+              <label style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '0.7rem' }}>
+                📥
+                <input type="file" accept=".json" onChange={handleImport} style={{ display: 'none' }} />
+              </label>
+              <button onClick={refreshSandboxFiles} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '0.7rem', opacity: isRefreshingFiles ? 0.5 : 1 }}>🔄</button>
+            </div>
           </div>
+          
+          {importExportStatus && (
+            <div style={{ padding: '0.5rem 1rem', fontSize: '0.7rem', color: importExportStatus.includes('failed') ? '#ef4444' : '#10b981', backgroundColor: '#fff', borderBottom: '1px solid #e2e8f0' }}>
+              {importExportStatus}
+            </div>
+          )}
           
           <div style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -430,8 +475,8 @@ export default function ToolsSandbox() {
         {selectedTool ? (
           <>
             <div style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fcfcfc' }}>
-              <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800 }}>{selectedToolId.toUpperCase()} WORKSPACE</h2>
-              <button onClick={() => resetToolDraft(selectedToolId!)} style={{ fontSize: '0.7rem', color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer' }}>Reset Tool</button>
+              <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800 }}>{selectedTool.name.toUpperCase()} WORKSPACE</h2>
+              <button onClick={() => resetToolDraft(selectedTool.name)} style={{ fontSize: '0.7rem', color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer' }}>Reset Tool</button>
             </div>
 
             <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
