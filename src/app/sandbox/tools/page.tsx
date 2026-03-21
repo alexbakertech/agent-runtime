@@ -434,8 +434,11 @@ export default function ToolsSandbox() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               {sandboxFiles.map(file => (
                 <div key={file.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem', backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
-                  <div style={{ fontSize: '0.75rem', color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {file.type === 'directory' ? '📁' : '📄'} {file.name}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', overflow: 'hidden' }}>
+                    <span style={{ fontSize: '0.65rem', padding: '0.1rem 0.3rem', backgroundColor: file.type === 'directory' ? '#fef3c7' : '#dbeafe', color: file.type === 'directory' ? '#92400e' : '#1e40af', borderRadius: '3px', fontWeight: 600 }}>
+                      {file.type === 'directory' ? 'DIR' : 'FILE'}
+                    </span>
+                    <span style={{ fontSize: '0.75rem', color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis' }}>{file.name}</span>
                   </div>
                   <button onClick={() => handleDeleteFile(file.name)} style={{ border: 'none', background: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '0.7rem' }}>Delete</button>
                 </div>
