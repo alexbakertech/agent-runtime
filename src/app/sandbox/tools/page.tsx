@@ -636,6 +636,7 @@ export default function ToolsSandbox() {
               <section>
                 <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.75rem' }}>1. CLIENT IMPLEMENTATION</h3>
                 <textarea 
+                  key={selectedToolId}
                   value={selectedTool.code} 
                   onChange={(e) => updateToolDraft(selectedToolId!, { code: e.target.value })}
                   style={{ width: '100%', padding: '1rem', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.8rem', fontFamily: 'monospace', minHeight: '250px', backgroundColor: '#1e293b', color: '#e2e8f0' }}
@@ -656,6 +657,7 @@ export default function ToolsSandbox() {
                       </div>
                     </div>
                     <textarea 
+                      key={`args-${selectedToolId}`}
                       value={selectedInvocation?.argsText} 
                       onChange={(e) => { 
                         updateInvocationDraft(selectedToolId!, { argsText: e.target.value }); 
@@ -701,6 +703,7 @@ export default function ToolsSandbox() {
               <section>
                 <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.75rem' }}>4. SCHEMA DEFINITION</h3>
                 <textarea 
+                  key={`schema-${selectedToolId}`}
                   value={selectedTool.schemaText} 
                   onChange={(e) => updateToolDraft(selectedToolId!, { schemaText: e.target.value })}
                   style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '0.75rem', fontFamily: 'monospace', minHeight: '100px' }}
