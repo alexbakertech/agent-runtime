@@ -415,12 +415,16 @@ export default function ToolsSandbox() {
           <div style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800 }}>SANDBOX FILES</h2>
             <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <button onClick={handleExport} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '0.7rem' }}>📤</button>
-              <label style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '0.7rem' }}>
-                📥
+              <button onClick={refreshSandboxFiles} disabled={isRefreshingFiles} style={{ border: '1px solid #e2e8f0', backgroundColor: '#fff', cursor: isRefreshingFiles ? 'not-allowed' : 'pointer', fontSize: '0.65rem', padding: '0.2rem 0.4rem', borderRadius: '4px', opacity: isRefreshingFiles ? 0.5 : 1 }}>
+                Refresh
+              </button>
+              <button onClick={handleExport} style={{ border: '1px solid #e2e8f0', backgroundColor: '#fff', cursor: 'pointer', fontSize: '0.65rem', padding: '0.2rem 0.4rem', borderRadius: '4px' }}>
+                Export
+              </button>
+              <label style={{ border: '1px solid #e2e8f0', backgroundColor: '#fff', cursor: 'pointer', fontSize: '0.65rem', padding: '0.2rem 0.4rem', borderRadius: '4px' }}>
+                Import
                 <input type="file" accept=".json" onChange={handleImport} style={{ display: 'none' }} />
               </label>
-              <button onClick={refreshSandboxFiles} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '0.7rem', opacity: isRefreshingFiles ? 0.5 : 1 }}>🔄</button>
             </div>
           </div>
           
