@@ -1,32 +1,20 @@
 'use client';
 
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { 
+  RuntimeEngine, 
+  Message, 
+  Override, 
+  LoopStage, 
+  RuntimeConfig, 
+  assembleRequest 
+} from '@/lib/runtime';
 
 const PROFILES_KEY = 'agent_runtime_profiles';
 const PREFIX_KEY = 'agent_runtime_prefix';
 
-interface Config {
-  name: string;
-  baseUrl: string;
-  apiKey: string;
-  model: string;
-}
-
-interface Message {
-  role: 'user' | 'assistant';
-  content: string;
-  contextSnapshot?: string; // Stores the full prompt sent at this turn
-}
-
-interface Override {
-  content?: string;
-  excluded?: boolean;
-}
-
-type LoopStage = 'idle' | 'preparing' | 'calling' | 'receiving' | 'finished' | 'error';
-
 export default function ContextEngine() {
-  const [activeProfile, setActiveProfile] = useState<Config | null>(null);
+  const [activeProfile, setActiveProfile] = useState<RuntimeConfig | null>(null);
   const [prefix, setPrefix] = useState('You are a helpful AI assistant. Answer concisely.');
   const [prefixEnabled, setPrefixEnabled] = useState(true);
   const [historyEnabled, setHistoryEnabled] = useState(true);
@@ -40,7 +28,6 @@ export default function ContextEngine() {
   const [stageData, setStageData] = useState<any>({});
   const [stepMode, setStepMode] = useState(false);
   const [isWaitingForNext, setIsWaitingForNext] = useState(false);
-  const [nextStepAction, setNextStepAction] = useState<(() => void) | null>(null);
   const [showFullPrompt, setShowFullPrompt] = useState(false);
   const [expandedStages, setExpandedStages] = useState<Record<string, boolean>>({});
   const [advancedMode, setAdvancedMode] = useState(false);
@@ -77,6 +64,8 @@ export default function ContextEngine() {
   const overrideCount = useMemo(() => Object.keys(overrides).length, [overrides]);
   const isDiffering = useMemo(() => overrideCount > 0, [overrideCount]);
 
+  const engineRef = useRef<RuntimeEngine | null>(null);
+
   // Persistence
   useEffect(() => {
     const savedProfiles = localStorage.getItem(PROFILES_KEY);
@@ -88,9 +77,33 @@ export default function ContextEngine() {
       } catch (e) { console.error(e); }
     }
     if (savedPrefix) setPrefix(savedPrefix);
+
+    // Initialize Engine
+    engineRef.current = new RuntimeEngine((stage, data) => {
+      setLoopStage(stage);
+      if (stage === 'receiving' && typeof data === 'string') {
+        setTranscript(prev => {
+          const next = [...prev];
+          if (next.length > 0) {
+            next[next.length - 1].content = data;
+          }
+          return next;
+        });
+        setStageData((prev: any) => ({ ...prev, receiving: data }));
+      } else if (data) {
+        setStageData((prev: any) => ({ ...prev, [stage]: data }));
+      }
+      setIsWaitingForNext(engineRef.current?.isWaitingForStep() || false);
+    });
   }, []);
 
   useEffect(() => { localStorage.setItem(PREFIX_KEY, prefix); }, [prefix]);
+
+  useEffect(() => {
+    if (engineRef.current) {
+      engineRef.current.setStepMode(stepMode);
+    }
+  }, [stepMode]);
 
   // Auto-resize / scroll
   useEffect(() => {
@@ -106,20 +119,9 @@ export default function ContextEngine() {
   const resetOverrides = () => setOverrides({});
   const toggleStageExpansion = (stage: string) => setExpandedStages(prev => ({ ...prev, [stage]: !prev[stage] }));
 
-  const waitIfStepping = async (stage: LoopStage, data?: any) => {
-    setLoopStage(stage);
-    if (data) setStageData((prev: any) => ({ ...prev, [stage]: data }));
-    if (stepMode) {
-      setIsWaitingForNext(true);
-      return new Promise<void>(resolve => {
-        setNextStepAction(() => () => { setIsWaitingForNext(false); resolve(); });
-      });
-    }
-  };
-
   const handleChat = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || chatStatus === 'loading' || !activeProfile) return;
+    if (!input.trim() || chatStatus === 'loading' || !activeProfile || !engineRef.current) return;
 
     const currentInput = input;
     setInput('');
@@ -127,68 +129,32 @@ export default function ContextEngine() {
     setStageData({});
 
     try {
-      // STAGE 1: Preparing
-      const messagesToSend = [...effectiveContext];
-      let fullPromptText = prefixEnabled ? prefix + '\n\n' : '';
-      messagesToSend.forEach(m => {
-        fullPromptText += `${m.role.toUpperCase()}: ${m.content}\n\n`;
-      });
-      fullPromptText += `USER: ${currentInput}`;
-
-      await waitIfStepping('preparing', { effectiveMessages: messagesToSend, fullPromptText });
-
-      // STAGE 2: Calling
-      const callData = { 
-        url: activeProfile.baseUrl, 
-        model: activeProfile.model, 
-        body: { model: activeProfile.model, message: fullPromptText } 
-      };
-      await waitIfStepping('calling', callData);
-
-      const controller = new AbortController();
-      abortControllerRef.current = controller;
-
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...activeProfile, message: fullPromptText }),
-        signal: controller.signal
+      // Assemble request for snapshot
+      const { fullPromptText } = assembleRequest(transcript, currentInput, overrides, {
+        prefix,
+        prefixEnabled,
+        historyEnabled
       });
 
-      if (!res.ok) throw new Error('API Failed');
+      // Prepare transcript for streaming
+      setTranscript(prev => [
+        ...prev, 
+        { role: 'user', content: currentInput, contextSnapshot: fullPromptText }, 
+        { role: 'assistant', content: '' }
+      ]);
 
-      // STAGE 3: Receiving
-      setLoopStage('receiving');
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
-      if (!reader) throw new Error('No reader');
-
-      let accumulated = '';
-      // Store context snapshot
-      setTranscript(prev => [...prev, { role: 'user', content: currentInput, contextSnapshot: fullPromptText }, { role: 'assistant', content: '' }]);
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value);
-        accumulated += chunk;
-        
-        setTranscript(prev => {
-          const next = [...prev];
-          next[next.length - 1].content = accumulated;
-          return next;
-        });
-        setStageData((prev: any) => ({ ...prev, receiving: accumulated }));
-      }
+      await engineRef.current.run(
+        activeProfile,
+        currentInput,
+        transcript,
+        overrides,
+        { prefix, prefixEnabled, historyEnabled }
+      );
       
-      setLoopStage('finished');
       setChatStatus('idle');
     } catch (err: any) {
-      setLoopStage('error');
-      setStageData((prev: any) => ({ ...prev, error: err.name === 'AbortError' ? 'Stopped' : err.message }));
       setChatStatus('error');
     } finally {
-      abortControllerRef.current = null;
       setIsWaitingForNext(false);
     }
   };
@@ -339,7 +305,7 @@ export default function ContextEngine() {
             <StepUI id="finished" label="4. Loop Complete" data={null} />
           </div>
           {isWaitingForNext && (
-            <button onClick={() => nextStepAction?.()} style={{ width: '100%', marginTop: '1rem', padding: '0.6rem', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 700, cursor: 'pointer' }}>
+            <button onClick={() => engineRef.current?.next()} style={{ width: '100%', marginTop: '1rem', padding: '0.6rem', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 700, cursor: 'pointer' }}>
               NEXT STEP →
             </button>
           )}
