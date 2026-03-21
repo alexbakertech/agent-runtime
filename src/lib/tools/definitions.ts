@@ -55,11 +55,21 @@ export const searchTextDefinition = {
   },
 };
 
+export const customToolDefinition = {
+  name: 'custom_tool',
+  description: 'A custom tool defined by the user.',
+  parameters: {
+    type: 'object',
+    properties: {},
+  },
+};
+
 export const toolDefinitions = [
   getTimeDefinition,
   listFilesDefinition,
   readFileDefinition,
   searchTextDefinition,
+  customToolDefinition,
 ];
 
-export type ToolName = 'get_time' | 'list_files' | 'read_file' | 'search_text';
+export type ToolName = 'get_time' | 'list_files' | 'read_file' | 'search_text' | 'custom_tool';
