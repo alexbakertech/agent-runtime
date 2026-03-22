@@ -335,11 +335,13 @@ export default function ContextEngine() {
           </div>
         )}
 
-        <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem' }}>
+        <div style={{ flex: 1, overflowY: showContextPreview ? 'hidden' : 'auto', padding: '1.5rem' }}>
           {showContextPreview ? (
-            <pre style={{ margin: 0, padding: '0.75rem', backgroundColor: '#1e293b', color: '#e2e8f0', borderRadius: '6px', fontSize: '0.7rem', whiteSpace: 'pre-wrap', maxHeight: 'calc(100vh - 280px)', overflowY: 'auto' }}>
-              {fullContextPreview}
-            </pre>
+            <div style={{ height: '100%', overflowY: 'auto', padding: '0.75rem', backgroundColor: '#1e293b', borderRadius: '6px' }}>
+              <pre style={{ margin: 0, fontSize: '0.7rem', whiteSpace: 'pre-wrap', color: '#e2e8f0' }}>
+                {fullContextPreview}
+              </pre>
+            </div>
           ) : (
             <>
               {/* PREFIX */}
@@ -530,7 +532,7 @@ export default function ContextEngine() {
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
                 {stepMode && (
                   <span style={{ fontSize: '0.65rem', color: '#3b82f6', fontWeight: 700, padding: '0.15rem 0.4rem', backgroundColor: '#eff6ff', borderRadius: '4px' }}>
-                    STEP MODE
+                    Step mode enabled
                   </span>
                 )}
                 {!prefixEnabled && (
