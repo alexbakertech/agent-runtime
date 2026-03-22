@@ -167,6 +167,12 @@ export default function ContextEngine() {
       setHistoryCollapsed(true);
     }
   };
+  const handlePrefixEnabledChange = (enabled: boolean) => {
+    setPrefixEnabled(enabled);
+    if (!enabled) {
+      setPrefixCollapsed(true);
+    }
+  };
 
   const handleChat = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -284,10 +290,10 @@ export default function ContextEngine() {
           <div style={{ marginBottom: '1.5rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <input type="checkbox" checked={prefixEnabled} onChange={e => setPrefixEnabled(e.target.checked)} />
+                <input type="checkbox" checked={prefixEnabled} onChange={e => handlePrefixEnabledChange(e.target.checked)} />
                 <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b' }}>PREFIX (SYSTEM PROMPT)</span>
               </div>
-              <button onClick={() => setPrefixCollapsed(!prefixCollapsed)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.7rem', color: '#94a3b8' }}>
+              <button onClick={() => setPrefixCollapsed(!prefixCollapsed)} disabled={!prefixEnabled} style={{ background: 'none', border: 'none', cursor: prefixEnabled ? 'pointer' : 'not-allowed', fontSize: '0.7rem', color: prefixEnabled ? '#94a3b8' : '#cbd5e1' }}>
                 {prefixCollapsed ? 'EXPAND' : 'COLLAPSE'}
               </button>
             </div>
@@ -323,23 +329,9 @@ export default function ContextEngine() {
                   <pre style={{ margin: 0, padding: '0.75rem', backgroundColor: '#1e293b', color: '#e2e8f0', borderRadius: '6px', fontSize: '0.7rem', whiteSpace: 'pre-wrap' }}>
                     {effectiveContext.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n')}
                   </pre>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                    {!includeThinkingInContext && (
-                      <div style={{
-                        fontSize: '0.75rem',
-                        color: '#1e40af',
-                        fontWeight: 600,
-                        textAlign: 'center',
-                        padding: '0.5rem',
-                        backgroundColor: '#eff6ff',
-                        borderRadius: '6px',
-                        border: '1px solid #dbeafe'
-                      }}>
-                        [Thinking excluded from context]
-                      </div>
-                    )}
-                    {transcript.map((msg, idx) => {
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                      {transcript.map((msg, idx) => {
                       const ovr = overrides[idx] || {};
                       const isUser = msg.role === 'user';
                       const isThinkingExcluded = !!ovr?.reasoningExcluded;
@@ -483,8 +475,34 @@ export default function ContextEngine() {
 
       {/* RIGHT: TRANSCRIPT */}
       <section style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#fff' }}>
-        <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800 }}>CANONICAL TRANSCRIPT</h2>
+        <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800 }}>CANONICAL TRANSCRIPT</h2>
+            {(stepMode || !prefixEnabled || !historyEnabled || !includeThinkingInContext) && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                {stepMode && (
+                  <span style={{ fontSize: '0.65rem', color: '#3b82f6', fontWeight: 700, padding: '0.15rem 0.4rem', backgroundColor: '#eff6ff', borderRadius: '4px' }}>
+                    STEP MODE
+                  </span>
+                )}
+                {!prefixEnabled && (
+                  <span style={{ fontSize: '0.65rem', color: '#7c3aed', fontWeight: 600, padding: '0.15rem 0.4rem', backgroundColor: '#f5f3ff', borderRadius: '4px' }}>
+                    System prompt excluded
+                  </span>
+                )}
+                {!historyEnabled && (
+                  <span style={{ fontSize: '0.65rem', color: '#dc2626', fontWeight: 600, padding: '0.15rem 0.4rem', backgroundColor: '#fef2f2', borderRadius: '4px' }}>
+                    History excluded
+                  </span>
+                )}
+                {!includeThinkingInContext && (
+                  <span style={{ fontSize: '0.65rem', color: '#d97706', fontWeight: 600, padding: '0.15rem 0.4rem', backgroundColor: '#fffbeb', borderRadius: '4px' }}>
+                    Thinking excluded
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
           <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
             <span style={{ fontSize: '0.7rem', color: '#94a3b8' }}>{activeProfile.name} • {activeProfile.model}</span>
           </div>
@@ -492,33 +510,6 @@ export default function ContextEngine() {
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '2rem' }}>
           <div style={{ maxWidth: '700px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2.5rem' }}>
-            {(!prefixEnabled || !historyEnabled || !includeThinkingInContext) && (
-              <div style={{ 
-                display: 'flex', 
-                flexWrap: 'wrap', 
-                gap: '0.75rem', 
-                padding: '0.75rem 1rem',
-                backgroundColor: '#fefce8',
-                borderRadius: '8px',
-                border: '1px solid #fef08a'
-              }}>
-                {!prefixEnabled && (
-                  <span style={{ fontSize: '0.7rem', color: '#7c3aed', fontWeight: 600 }}>
-                    [System prompt excluded]
-                  </span>
-                )}
-                {!historyEnabled && (
-                  <span style={{ fontSize: '0.7rem', color: '#dc2626', fontWeight: 600 }}>
-                    [History excluded]
-                  </span>
-                )}
-                {!includeThinkingInContext && (
-                  <span style={{ fontSize: '0.7rem', color: '#d97706', fontWeight: 600 }}>
-                    [Thinking excluded]
-                  </span>
-                )}
-              </div>
-            )}
             {transcript.map((msg, i) => {
               const ovr = overrides[i];
               const isUser = msg.role === 'user';
@@ -595,20 +586,20 @@ export default function ContextEngine() {
                     </div>
 
                     {/* SHOW OVERRIDE CONTENT BELOW CROSSED OUT ORIGINAL */}
-                    {isContentEdited && !isExcluded && (
-                      <div style={{ marginTop: '0.75rem', padding: '0.75rem', borderLeft: '3px solid #f59e0b', backgroundColor: '#fffbeb', borderRadius: '0 4px 4px 0' }}>
-                        <div style={{ fontSize: '0.65rem', fontWeight: 700, color: '#b45309', marginBottom: '0.25rem', textTransform: 'uppercase' }}>Active Context Override:</div>
-                        <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, fontSize: '0.95rem', color: '#334155' }}>
-                          {ovr.content}
-                        </div>
-                      </div>
-                    )}
-
                     {isThinkingEdited && !isThinkingExcluded && !isExcluded && (
                       <div style={{ marginTop: '0.75rem', padding: '0.75rem', borderLeft: '3px solid #d97706', backgroundColor: '#fffbeb', borderRadius: '0 4px 4px 0' }}>
                         <div style={{ fontSize: '0.65rem', fontWeight: 700, color: '#b45309', marginBottom: '0.25rem', textTransform: 'uppercase' }}>Thinking Override:</div>
                         <div style={{ whiteSpace: 'pre-wrap', fontSize: '0.8rem', color: '#94a3b8', fontStyle: 'italic' }}>
                           {ovr.reasoningContent}
+                        </div>
+                      </div>
+                    )}
+
+                    {isContentEdited && !isExcluded && (
+                      <div style={{ marginTop: '0.75rem', padding: '0.75rem', borderLeft: '3px solid #f59e0b', backgroundColor: '#fffbeb', borderRadius: '0 4px 4px 0' }}>
+                        <div style={{ fontSize: '0.65rem', fontWeight: 700, color: '#b45309', marginBottom: '0.25rem', textTransform: 'uppercase' }}>Response Override:</div>
+                        <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, fontSize: '0.95rem', color: '#334155' }}>
+                          {ovr.content}
                         </div>
                       </div>
                     )}
