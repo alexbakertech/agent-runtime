@@ -1,5 +1,7 @@
 import { LoopStage, TraceEvent, RuntimeConfig, Message, Override, RequestAssemblyOptions } from './types';
 import { assembleRequest } from './assembly';
+import { OpenAI } from 'openai';
+import { isBrowserConsentGiven } from '@/lib/api/client';
 
 export type RuntimeEventHandler = (stage: LoopStage, data?: any) => void;
 
@@ -96,35 +98,35 @@ export class RuntimeEngine {
       };
       await this.transition('calling', callData);
 
-      // Perform the actual call (could be delegated, but implementing here for now)
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...config, message: fullPromptText }),
+      if (!isBrowserConsentGiven()) {
+        throw new Error('Browser API consent required. Please enable "Allow browser API calls" in settings.');
+      }
+
+      const openai = new OpenAI({
+        baseURL: config.baseUrl,
+        apiKey: config.apiKey,
+        dangerouslyAllowBrowser: true,
       });
 
-      if (!response.ok) throw new Error(`API failed: ${response.statusText}`);
+      const stream = await openai.chat.completions.create({
+        model: config.model,
+        messages: [{ role: 'user', content: fullPromptText }],
+        stream: true,
+      });
 
-      // STAGE 3: Receiving (Streaming)
-      // Note: Since streaming involves updating state continuously, 
-      // we'll emit 'receiving' events with the current chunk.
       await this.transition('receiving');
-      
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      if (!reader) throw new Error('No reader available on response body.');
 
       let accumulated = '';
-      
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value);
-        accumulated += chunk;
-        
-        // Emit update (though transition logic for 'receiving' usually happens once, 
-        // we can provide updates through onEvent)
-        this.onEvent('receiving', accumulated);
+
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta as Record<string, string> | undefined;
+        const content = delta?.content || '';
+        const reasoning = (delta?.reasoning_content as string | undefined) || '';
+        if (content || reasoning) {
+          const text = content + reasoning;
+          accumulated += text;
+          this.onEvent('receiving', accumulated);
+        }
       }
 
       await this.transition('finished', accumulated);

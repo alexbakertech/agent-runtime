@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { testConnection, fetchModels, chatStream, setBrowserConsent, isBrowserConsentGiven, BrowserConsentRequiredError } from '@/lib/api/client';
 
 const PROFILES_KEY = 'agent_runtime_profiles';
 
@@ -34,6 +35,8 @@ export default function Home() {
   const [profilesCollapsed, setProfilesCollapsed] = useState(false);
   const [configCollapsed, setConfigCollapsed] = useState(false);
   const [editingName, setEditingName] = useState<string | null>(null);
+  const [browserConsent, setBrowserConsentState] = useState(false);
+  const [showConsentWarning, setShowConsentWarning] = useState(false);
 
   // Chat state
   const [input, setInput] = useState('');
@@ -72,6 +75,10 @@ export default function Home() {
         console.error('Failed to parse saved profiles', e);
       }
     }
+  }, []);
+
+  useEffect(() => {
+    setBrowserConsentState(isBrowserConsentGiven());
   }, []);
 
   const saveProfile = () => {
@@ -138,23 +145,25 @@ export default function Home() {
   };
 
   const handleFetchModels = async () => {
+    if (!isBrowserConsentGiven()) {
+      setShowConsentWarning(true);
+      return;
+    }
     setStatus({ type: 'loading', message: 'Fetching...' });
     try {
-      const response = await fetch('/api/models', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ baseUrl: config.baseUrl, apiKey: config.apiKey }),
-      });
-      const data = await response.json();
-      if (response.ok) {
-        const models = (data.models || []).map((m: any) => m.id);
-        setAvailableModels(models);
-        if (models.length > 0 && !models.includes(config.model)) {
-          updateConfig({ model: models[0] });
+      const result = await fetchModels(config);
+      if (result.success && result.models) {
+        setAvailableModels(result.models);
+        if (result.models.length > 0 && !result.models.includes(config.model)) {
+          updateConfig({ model: result.models[0] });
         }
-        setStatus({ type: 'success', message: `Found ${models.length} models.` });
+        setStatus({ type: 'success', message: `Found ${result.models.length} models.` });
       } else {
-        throw new Error(data.error || 'Fetch failed');
+        if (result.error === 'BROWSER_CONSENT_REQUIRED') {
+          setShowConsentWarning(true);
+        } else {
+          throw new Error(result.error || 'Fetch failed');
+        }
       }
     } catch (err: any) {
       setStatus({ type: 'error', message: err.message });
@@ -162,22 +171,25 @@ export default function Home() {
   };
 
   const handleTest = async () => {
+    if (!isBrowserConsentGiven()) {
+      setShowConsentWarning(true);
+      return;
+    }
     if (!config.model) {
       setStatus({ type: 'error', message: 'Enter a model first.' });
       return;
     }
     setStatus({ type: 'loading', message: `Testing...` });
     try {
-      const response = await fetch('/api/test-connection', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
-      });
-      const data = await response.json();
-      if (response.ok) {
-        setStatus({ type: 'success', message: `Connected: ${data.model}` });
+      const result = await testConnection(config);
+      if (result.success) {
+        setStatus({ type: 'success', message: `Connected: ${result.model}` });
       } else {
-        throw new Error(data.error || 'Failed');
+        if (result.error === 'BROWSER_CONSENT_REQUIRED') {
+          setShowConsentWarning(true);
+        } else {
+          throw new Error(result.error || 'Failed');
+        }
       }
     } catch (err: any) {
       setStatus({ type: 'error', message: err.message });
@@ -188,51 +200,31 @@ export default function Home() {
     e.preventDefault();
     if (!input.trim() || chatStatus === 'loading') return;
 
+    if (!isBrowserConsentGiven()) {
+      setShowConsentWarning(true);
+      return;
+    }
+
     const currentInput = input;
     setInput('');
     setChatStatus('loading');
     
-    // Add user message to history
     setMessages(prev => [...prev, { role: 'user', content: currentInput }]);
-    
-    // Create a placeholder for the assistant response
     setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
-    
+
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
     try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...config, message: currentInput }),
-        signal: controller.signal
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Chat failed');
-      }
-
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
-
-      if (!reader) throw new Error('No reader found on response');
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value);
-        
-        // Update the LAST assistant message in history
+      for await (const chunk of chatStream(config, currentInput)) {
+        if (controller.signal.aborted) break;
         setMessages(prev => {
           const newMessages = [...prev];
           const lastIdx = newMessages.length - 1;
           if (newMessages[lastIdx].role === 'assistant') {
-            newMessages[lastIdx] = { 
-              ...newMessages[lastIdx], 
-              content: newMessages[lastIdx].content + chunk 
+            newMessages[lastIdx] = {
+              ...newMessages[lastIdx],
+              content: newMessages[lastIdx].content + chunk
             };
           }
           return newMessages;
@@ -242,16 +234,19 @@ export default function Home() {
       setChatStatus('idle');
     } catch (err: any) {
       if (err.name === 'AbortError') {
-        // We don't clear, we just stop. The user already has the partial content.
+        setChatStatus('idle');
+      } else if (err instanceof BrowserConsentRequiredError) {
+        setMessages(prev => prev.slice(0, -1));
+        setShowConsentWarning(true);
         setChatStatus('idle');
       } else {
         setMessages(prev => {
           const newMessages = [...prev];
           const lastIdx = newMessages.length - 1;
           if (newMessages[lastIdx].role === 'assistant') {
-            newMessages[lastIdx] = { 
-              ...newMessages[lastIdx], 
-              content: newMessages[lastIdx].content + `\n\n**Error:** ${err.message}` 
+            newMessages[lastIdx] = {
+              ...newMessages[lastIdx],
+              content: newMessages[lastIdx].content + `\n\n**Error:** ${err.message}`
             };
           }
           return newMessages;
@@ -378,6 +373,21 @@ export default function Home() {
                   )}
                   <button onClick={handleFetchModels} style={{ padding: '0 0.5rem', border: '1px solid #e2e8f0', borderRadius: '6px', background: '#fff', fontSize: '0.7rem', color: '#64748b', cursor: 'pointer' }}>Fetch</button>
                 </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
+                <input
+                  type="checkbox"
+                  id="browser-consent"
+                  checked={browserConsent}
+                  onChange={(e) => {
+                    setBrowserConsentState(e.target.checked);
+                    setBrowserConsent(e.target.checked);
+                  }}
+                />
+                <label htmlFor="browser-consent" style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                  Allow browser API calls (required for local models)
+                </label>
               </div>
 
               <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
@@ -544,6 +554,70 @@ export default function Home() {
         </div>
 
       </main>
+
+      {showConsentWarning && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            padding: '1.5rem',
+            borderRadius: '8px',
+            maxWidth: '400px',
+            margin: '1rem'
+          }}>
+            <h3 style={{ marginTop: 0 }}>Browser API Access Required</h3>
+            <p style={{ fontSize: '0.9rem', color: '#64748b' }}>
+              To use this feature, you must allow browser-based API calls. 
+              This means your API key will be stored in your browser and 
+              API calls will be made directly from your browser.
+            </p>
+            <p style={{ fontSize: '0.9rem', color: '#64748b' }}>
+              <strong>You are responsible for:</strong>
+            </p>
+            <ul style={{ fontSize: '0.9rem', color: '#64748b', paddingLeft: '1.5rem' }}>
+              <li>Securing your browser and device</li>
+              <li>Not using this on shared or public computers</li>
+              <li>Understanding that API calls will originate from your IP</li>
+            </ul>
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
+              <button
+                onClick={() => setShowConsentWarning(false)}
+                style={{ padding: '0.5rem 1rem', cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setBrowserConsentState(true);
+                  setBrowserConsent(true);
+                  setShowConsentWarning(false);
+                }}
+                style={{
+                  padding: '0.5rem 1rem',
+                  backgroundColor: '#3b82f6',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer'
+                }}
+              >
+                I Understand, Enable
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

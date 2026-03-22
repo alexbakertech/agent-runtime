@@ -1,26 +1,8 @@
-import { OpenAI } from 'openai';
-import { NextResponse } from 'next/server';
-
-export async function POST(req: Request) {
-  try {
-    const { baseUrl, apiKey } = await req.json();
-
-    const openai = new OpenAI({
-      baseURL: baseUrl,
-      apiKey: apiKey,
-    });
-
-    const response = await openai.models.list();
-
-    return NextResponse.json({ 
-      success: true, 
-      models: response.data 
-    });
-  } catch (error: any) {
-    console.error('Failed to fetch models:', error);
-    return NextResponse.json(
-      { error: error.message || 'Failed to fetch models' },
-      { status: 500 }
-    );
-  }
+// DEPRECATED: API calls are now made directly from the client using the OpenAI SDK.
+// This route is kept for reference and can be deleted after verification.
+export async function POST() {
+  return new Response(
+    JSON.stringify({ error: 'This endpoint is deprecated. API calls are now made directly from the client.' }),
+    { status: 410, headers: { 'Content-Type': 'application/json' } }
+  );
 }
