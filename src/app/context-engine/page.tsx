@@ -37,6 +37,11 @@ export default function ContextEngine() {
   const [prefixCollapsed, setPrefixCollapsed] = useState(false);
   const [historyCollapsed, setHistoryCollapsed] = useState(false);
 
+  // Thinking/Reasoning states
+  const [includeThinkingInContext, setIncludeThinkingInContext] = useState(false);
+  const [expandedContextThinking, setExpandedContextThinking] = useState<Record<number, boolean>>({});
+  const [expandedThinking, setExpandedThinking] = useState<Record<number, boolean>>({});
+
   // Chat input
   const [input, setInput] = useState('');
   const [chatStatus, setChatStatus] = useState<'idle' | 'loading' | 'error'>('idle');
@@ -81,15 +86,23 @@ export default function ContextEngine() {
     // Initialize Engine
     engineRef.current = new RuntimeEngine((stage, data) => {
       setLoopStage(stage);
-      if (stage === 'receiving' && typeof data === 'string') {
+      if (stage === 'receiving' && typeof data === 'object') {
+        const { content, reasoning, hasThinking } = data;
         setTranscript(prev => {
           const next = [...prev];
           if (next.length > 0) {
-            next[next.length - 1].content = data;
+            next[next.length - 1] = {
+              ...next[next.length - 1],
+              content: content,
+              reasoningContent: reasoning || next[next.length - 1].reasoningContent
+            };
           }
           return next;
         });
-        setStageData((prev: any) => ({ ...prev, receiving: data }));
+        setStageData((prev: any) => ({ ...prev, 
+          receiving: content,
+          hasThinking
+        }));
       } else if (data) {
         setStageData((prev: any) => ({ ...prev, [stage]: data }));
       }
@@ -117,6 +130,11 @@ export default function ContextEngine() {
 
   // ACTIONS
   const resetOverrides = () => setOverrides({});
+  const resetTurn = (idx: number) => setOverrides(prev => {
+    const next = { ...prev };
+    delete next[idx];
+    return next;
+  });
   const toggleStageExpansion = (stage: string) => setExpandedStages(prev => ({ ...prev, [stage]: !prev[stage] }));
 
   const handleChat = async (e: React.FormEvent) => {
@@ -133,13 +151,14 @@ export default function ContextEngine() {
       const { fullPromptText } = assembleRequest(transcript, currentInput, overrides, {
         prefix,
         prefixEnabled,
-        historyEnabled
+        historyEnabled,
+        includeThinkingInContext
       });
 
       // Prepare transcript for streaming
       setTranscript(prev => [
-        ...prev, 
-        { role: 'user', content: currentInput, contextSnapshot: fullPromptText }, 
+        ...prev,
+        { role: 'user', content: currentInput, contextSnapshot: fullPromptText },
         { role: 'assistant', content: '' }
       ]);
 
@@ -148,9 +167,9 @@ export default function ContextEngine() {
         currentInput,
         transcript,
         overrides,
-        { prefix, prefixEnabled, historyEnabled }
+        { prefix, prefixEnabled, historyEnabled, includeThinkingInContext }
       );
-      
+
       setChatStatus('idle');
     } catch (err: any) {
       setChatStatus('error');
@@ -261,25 +280,135 @@ export default function ContextEngine() {
               </button>
             </div>
             
-            {!historyCollapsed && (
-              advancedMode ? (
-                <pre style={{ margin: 0, padding: '0.75rem', backgroundColor: '#1e293b', color: '#e2e8f0', borderRadius: '6px', fontSize: '0.7rem', whiteSpace: 'pre-wrap' }}>
-                  {effectiveContext.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n')}
-                </pre>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                  {transcript.map((msg, idx) => {
-                    const ovr = overrides[idx] || {};
-                    return (
-                      <div key={idx} style={{ padding: '0.75rem', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: ovr.excluded ? '#f1f5f9' : '#fff', opacity: ovr.excluded ? 0.6 : 1 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                          <span style={{ fontSize: '0.65rem', fontWeight: 800, color: '#94a3b8' }}>{msg.role.toUpperCase()} (T-{idx})</span>
-                        </div>
-                        <textarea 
+              {!historyCollapsed && (
+                advancedMode ? (
+                  <pre style={{ margin: 0, padding: '0.75rem', backgroundColor: '#1e293b', color: '#e2e8f0', borderRadius: '6px', fontSize: '0.7rem', whiteSpace: 'pre-wrap' }}>
+                    {effectiveContext.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n')}
+                  </pre>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    {!includeThinkingInContext && (
+                      <div style={{
+                        fontSize: '0.7rem',
+                        color: '#94a3b8',
+                        textAlign: 'center',
+                        padding: '0.5rem',
+                        backgroundColor: '#f1f5f9',
+                        borderRadius: '6px'
+                      }}>
+                        [Thinking excluded from context]
+                      </div>
+                    )}
+                    {transcript.map((msg, idx) => {
+                      const ovr = overrides[idx] || {};
+                      const isUser = msg.role === 'user';
+                      const isThinkingExcluded = !!ovr?.reasoningExcluded;
+                      
+                      if (isUser) {
+                        return (
+                          <div key={idx} style={{ padding: '0.75rem', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: ovr.excluded ? '#f1f5f9' : '#fff', opacity: ovr.excluded ? 0.6 : 1 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                              <span style={{ fontSize: '0.65rem', fontWeight: 800, color: '#94a3b8' }}>USER (T-{idx})</span>
+                              <button 
+                                onClick={() => resetTurn(idx)}
+                                style={{ fontSize: '0.6rem', cursor: 'pointer', color: '#ef4444', background: 'none', border: 'none', fontWeight: 600 }}
+                              >
+                                Reset
+                              </button>
+                            </div>
+                            <textarea 
+                              value={ovr.content !== undefined ? ovr.content : msg.content}
+                              onChange={(e) => setOverrides(prev => ({ ...prev, [idx]: { ...prev[idx], content: e.target.value } }))}
+                              style={{ width: '100%', border: 'none', background: 'none', fontSize: '0.8rem', resize: 'vertical', outline: 'none', fontFamily: 'inherit', minHeight: '40px' }}
+                            />
+                            <button 
+                              onClick={() => setOverrides(prev => ({ ...prev, [idx]: { ...prev[idx], excluded: !ovr?.excluded } }))}
+                              style={{ fontSize: '0.65rem', cursor: 'pointer', marginTop: '0.5rem', border: '1px solid #e2e8f0', background: '#fff', borderRadius: '4px', padding: '0.2rem 0.4rem' }}
+                            >
+                              {ovr?.excluded ? 'INCLUDE' : 'EXCLUDE'}
+                            </button>
+                          </div>
+                        );
+                      }
+                      
+                      // Assistant message with thinking sub-item
+                      return (
+                        <div key={idx} style={{ padding: '0.75rem', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: ovr.excluded ? '#f1f5f9' : '#fff', opacity: ovr.excluded ? 0.6 : 1 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                            <span style={{ fontSize: '0.65rem', fontWeight: 800, color: '#94a3b8' }}>ASSISTANT (T-{idx})</span>
+                            <button 
+                              onClick={() => resetTurn(idx)}
+                              style={{ fontSize: '0.6rem', cursor: 'pointer', color: '#ef4444', background: 'none', border: 'none', fontWeight: 600 }}
+                            >
+                              Reset
+                            </button>
+                          </div>
+                          
+                          {/* Thinking sub-item - grey out when excluded */}
+                          {msg.reasoningContent && includeThinkingInContext && (
+                            <div style={{ marginBottom: '0.5rem', opacity: isThinkingExcluded ? 0.5 : 1 }}>
+                              <button 
+                                onClick={() => setExpandedContextThinking(prev => ({ ...prev, [idx]: !prev[idx] }))}
+                                style={{ 
+                                  fontSize: '0.65rem', 
+                                  color: '#94a3b8', 
+                                  background: 'none', 
+                                  border: 'none', 
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '0.3rem'
+                                }}
+                              >
+                                {expandedContextThinking[idx] ? '▼' : '▶'} Thinking
+                              </button>
+                              {expandedContextThinking[idx] && (
+                                <div style={{ marginTop: '0.25rem' }}>
+                                  <textarea
+                                    value={ovr.reasoningContent !== undefined ? ovr.reasoningContent : msg.reasoningContent}
+                                    onChange={(e) => setOverrides(prev => ({ ...prev, [idx]: { ...prev[idx], reasoningContent: e.target.value } }))}
+                                    style={{ 
+                                      width: '100%', 
+                                      border: 'none', 
+                                      background: 'none', 
+                                      fontSize: '0.8rem', 
+                                      resize: 'vertical', 
+                                      outline: 'none', 
+                                      fontFamily: 'inherit', 
+                                      minHeight: '40px',
+                                      color: '#94a3b8',
+                                      fontStyle: 'italic'
+                                    }}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        
+                        {/* Content sub-item */}
+                        <textarea
                           value={ovr.content !== undefined ? ovr.content : msg.content}
                           onChange={(e) => setOverrides(prev => ({ ...prev, [idx]: { ...prev[idx], content: e.target.value } }))}
                           style={{ width: '100%', border: 'none', background: 'none', fontSize: '0.8rem', resize: 'vertical', outline: 'none', fontFamily: 'inherit', minHeight: '40px' }}
                         />
+                        
+                        {/* Exclusion buttons */}
+                        <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.25rem' }}>
+                          <button 
+                            onClick={() => setOverrides(prev => ({ ...prev, [idx]: { ...prev[idx], excluded: !ovr?.excluded, reasoningExcluded: !ovr?.excluded ? true : prev[idx]?.reasoningExcluded } }))}
+                            style={{ fontSize: '0.65rem', cursor: 'pointer', border: '1px solid #e2e8f0', background: '#fff', borderRadius: '4px', padding: '0.2rem 0.4rem' }}
+                          >
+                            {ovr?.excluded ? 'INCLUDE' : 'EXCLUDE'}
+                          </button>
+                          {msg.reasoningContent && (
+                            <button 
+                              onClick={() => setOverrides(prev => ({ ...prev, [idx]: { ...prev[idx], reasoningExcluded: !prev[idx]?.reasoningExcluded } }))}
+                              style={{ fontSize: '0.65rem', cursor: 'pointer', border: '1px solid #e2e8f0', background: '#fff', borderRadius: '4px', padding: '0.2rem 0.4rem' }}
+                            >
+                              {ovr?.reasoningExcluded ? 'INCLUDE THINKING' : 'EXCLUDE THINKING'}
+                            </button>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
@@ -316,7 +445,15 @@ export default function ContextEngine() {
       <section style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#fff' }}>
         <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800 }}>CANONICAL TRANSCRIPT</h2>
-          <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>{activeProfile.name} • {activeProfile.model}</div>
+          <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.75rem', color: '#64748b' }}>
+                <input type="checkbox" checked={includeThinkingInContext} onChange={e => setIncludeThinkingInContext(e.target.checked)} />
+                Include in context
+              </label>
+            </div>
+            <span style={{ fontSize: '0.7rem', color: '#94a3b8' }}>{activeProfile.name} • {activeProfile.model}</span>
+          </div>
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '2rem' }}>
@@ -326,7 +463,10 @@ export default function ContextEngine() {
               const isUser = msg.role === 'user';
               const showSnapshot = viewingSnapshotIndex === i;
               const isExcluded = !!ovr?.excluded;
-              const isEdited = ovr?.content !== undefined;
+              const isContentEdited = ovr?.content !== undefined;
+              const isThinkingEdited = ovr?.reasoningContent !== undefined;
+              const isThinkingExcluded = !!ovr?.reasoningExcluded;
+              const hasContent = msg.content.length > 0;
 
               return (
                 <div key={i} style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
@@ -334,20 +474,68 @@ export default function ContextEngine() {
                     {isUser ? 'U' : 'AI'}
                   </div>
                   <div style={{ flex: 1 }}>
+                    {/* REASONING/THINKING - above content, always shown */}
+                    {msg.reasoningContent && hasContent && (
+                      <div style={{ marginBottom: '0.5rem' }}>
+                        <button
+                          onClick={() => setExpandedThinking(prev => ({ ...prev, [i]: !prev[i] }))}
+                          style={{
+                            fontSize: '0.7rem',
+                            color: '#94a3b8',
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.3rem',
+                            textDecoration: isExcluded || isThinkingEdited || isThinkingExcluded ? 'line-through' : 'none'
+                          }}
+                        >
+                          {expandedThinking[i] ? '▼' : '▶'} Thinking ({msg.reasoningContent.length} chars)
+                        </button>
+                        {expandedThinking[i] && (
+                          <pre style={{
+                            margin: '0.5rem 0',
+                            padding: '0.5rem',
+                            fontSize: '0.8rem',
+                            whiteSpace: 'pre-wrap',
+                            fontFamily: 'monospace',
+                            color: '#94a3b8',
+                            fontStyle: 'italic',
+                            textDecoration: isExcluded || isThinkingEdited || isThinkingExcluded ? 'line-through' : 'none'
+                          }}>
+                            {msg.reasoningContent}
+                          </pre>
+                        )}
+                      </div>
+                    )}
+
+                    {/* SHOW THINKING OVERRIDE WHEN EDITED/EXCLUDED (but not excluded by main toggle) */}
+                    {(isThinkingEdited || isThinkingExcluded) && !isExcluded && msg.reasoningContent && (
+                      <div style={{ marginTop: '0.5rem', marginBottom: '0.5rem', padding: '0.5rem', borderLeft: '3px solid #f59e0b', backgroundColor: '#fffbeb', borderRadius: '0 4px 4px 0' }}>
+                        <div style={{ fontSize: '0.65rem', fontWeight: 700, color: '#b45309', marginBottom: '0.25rem', textTransform: 'uppercase' }}>
+                          {isThinkingExcluded ? 'Thinking Excluded' : 'Thinking Override'}
+                        </div>
+                        <div style={{ whiteSpace: 'pre-wrap', fontSize: '0.85rem', color: '#94a3b8', fontStyle: 'italic' }}>
+                          {isThinkingEdited ? ovr.reasoningContent : '[Thinking excluded from context]'}
+                        </div>
+                      </div>
+                    )}
+
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                       <div style={{ 
                         whiteSpace: 'pre-wrap', 
                         lineHeight: 1.6, 
                         fontSize: '0.95rem', 
-                        color: isExcluded || isEdited ? '#94a3b8' : '#334155',
-                        textDecoration: isExcluded || isEdited ? 'line-through' : 'none',
+                        color: isExcluded || isContentEdited ? '#94a3b8' : '#334155',
+                        textDecoration: isExcluded || isContentEdited ? 'line-through' : 'none',
                         flex: 1 
                       }}>
                         {msg.content || (chatStatus === 'loading' && i === transcript.length - 1 ? '...' : '')}
                       </div>
                       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', marginLeft: '1rem' }}>
                         <button 
-                          onClick={() => setOverrides(prev => ({ ...prev, [i]: { ...prev[i], excluded: !ovr?.excluded } }))}
+                          onClick={() => setOverrides(prev => ({ ...prev, [i]: { ...prev[i], excluded: !ovr?.excluded, reasoningExcluded: !ovr?.excluded ? true : prev[i]?.reasoningExcluded } }))}
                           style={{ fontSize: '0.65rem', cursor: 'pointer', border: '1px solid #e2e8f0', background: '#fff', borderRadius: '4px', padding: '0.2rem 0.4rem', whiteSpace: 'nowrap' }}
                         >
                           {ovr?.excluded ? 'INCLUDE' : 'EXCLUDE'}
@@ -364,7 +552,7 @@ export default function ContextEngine() {
                     </div>
 
                     {/* SHOW OVERRIDE CONTENT BELOW CROSSED OUT ORIGINAL */}
-                    {isEdited && !isExcluded && (
+                    {isContentEdited && !isExcluded && (
                       <div style={{ marginTop: '0.75rem', padding: '0.75rem', borderLeft: '3px solid #f59e0b', backgroundColor: '#fffbeb', borderRadius: '0 4px 4px 0' }}>
                         <div style={{ fontSize: '0.65rem', fontWeight: 700, color: '#b45309', marginBottom: '0.25rem', textTransform: 'uppercase' }}>Active Context Override:</div>
                         <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, fontSize: '0.95rem', color: '#334155' }}>

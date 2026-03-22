@@ -85,16 +85,16 @@ export class RuntimeEngine {
   ) {
     try {
       this.trace = [];
-      
+
       // STAGE 1: Preparing (Request Assembly)
       const { fullPromptText, effectiveHistory } = assembleRequest(transcript, input, overrides, options);
       await this.transition('preparing', { effectiveMessages: effectiveHistory, fullPromptText });
 
       // STAGE 2: Calling (API Call)
-      const callData = { 
-        url: config.baseUrl, 
-        model: config.model, 
-        body: { model: config.model, message: fullPromptText } 
+      const callData = {
+        url: config.baseUrl,
+        model: config.model,
+        body: { model: config.model, message: fullPromptText }
       };
       await this.transition('calling', callData);
 
@@ -116,22 +116,39 @@ export class RuntimeEngine {
 
       await this.transition('receiving');
 
-      let accumulated = '';
+      let accumulatedContent = '';
+      let accumulatedReasoning = '';
 
       for await (const chunk of stream) {
         const delta = chunk.choices[0]?.delta as Record<string, string> | undefined;
         const content = delta?.content || '';
         const reasoning = (delta?.reasoning_content as string | undefined) || '';
-        if (content || reasoning) {
-          const text = content + reasoning;
-          accumulated += text;
-          this.onEvent('receiving', accumulated);
+
+        if (reasoning) {
+          accumulatedReasoning += reasoning;
         }
+
+        if (content) {
+          accumulatedContent += content;
+        }
+
+        this.onEvent('receiving', {
+          content: accumulatedContent,
+          reasoning: accumulatedReasoning,
+          hasThinking: !!accumulatedReasoning
+        });
       }
 
-      await this.transition('finished', accumulated);
-      return accumulated;
-      
+      await this.transition('finished', {
+        content: accumulatedContent,
+        reasoning: accumulatedReasoning
+      });
+
+      return {
+        content: accumulatedContent,
+        reasoning: accumulatedReasoning
+      };
+
     } catch (err: any) {
       await this.transition('error', err.message || 'Unknown error');
       throw err;

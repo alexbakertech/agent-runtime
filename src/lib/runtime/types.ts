@@ -4,6 +4,7 @@ export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
   contextSnapshot?: string;
+  reasoningContent?: string;
 }
 
 export interface RuntimeConfig {
@@ -21,7 +22,9 @@ export interface TraceEvent {
 
 export interface Override {
   content?: string;
+  reasoningContent?: string;
   excluded?: boolean;
+  reasoningExcluded?: boolean;
 }
 
 export interface ExecutionState {
@@ -34,4 +37,5 @@ export interface RequestAssemblyOptions {
   prefix?: string;
   prefixEnabled?: boolean;
   historyEnabled?: boolean;
+  includeThinkingInContext?: boolean;
 }
