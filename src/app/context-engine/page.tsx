@@ -66,7 +66,31 @@ export default function ContextEngine() {
     return result;
   }, [transcript, overrides, historyEnabled]);
 
-  const overrideCount = useMemo(() => Object.keys(overrides).length, [overrides]);
+  const overrideCount = useMemo(() => {
+    let count = 0;
+    transcript.forEach((msg, idx) => {
+      const ovr = overrides[idx];
+      if (!ovr) return;
+      
+      if (ovr.excluded) {
+        count++;
+        return;
+      }
+      
+      if (ovr.content !== undefined && ovr.content !== msg.content) {
+        count++;
+      }
+      
+      if (msg.reasoningContent && ovr.reasoningExcluded) {
+        count++;
+      }
+      
+      if (ovr.reasoningContent !== undefined && ovr.reasoningContent !== msg.reasoningContent) {
+        count++;
+      }
+    });
+    return count;
+  }, [transcript, overrides]);
   const isDiffering = useMemo(() => overrideCount > 0, [overrideCount]);
 
   const engineRef = useRef<RuntimeEngine | null>(null);
@@ -280,6 +304,11 @@ export default function ContextEngine() {
               </button>
             </div>
             
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <input type="checkbox" checked={includeThinkingInContext} onChange={e => setIncludeThinkingInContext(e.target.checked)} />
+              <span style={{ fontSize: '0.7rem', color: '#64748b' }}>Include thinking in context</span>
+            </div>
+            
               {!historyCollapsed && (
                 advancedMode ? (
                   <pre style={{ margin: 0, padding: '0.75rem', backgroundColor: '#1e293b', color: '#e2e8f0', borderRadius: '6px', fontSize: '0.7rem', whiteSpace: 'pre-wrap' }}>
@@ -289,12 +318,14 @@ export default function ContextEngine() {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                     {!includeThinkingInContext && (
                       <div style={{
-                        fontSize: '0.7rem',
-                        color: '#94a3b8',
+                        fontSize: '0.75rem',
+                        color: '#1e40af',
+                        fontWeight: 600,
                         textAlign: 'center',
                         padding: '0.5rem',
-                        backgroundColor: '#f1f5f9',
-                        borderRadius: '6px'
+                        backgroundColor: '#eff6ff',
+                        borderRadius: '6px',
+                        border: '1px solid #dbeafe'
                       }}>
                         [Thinking excluded from context]
                       </div>
@@ -446,12 +477,6 @@ export default function ContextEngine() {
         <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800 }}>CANONICAL TRANSCRIPT</h2>
           <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.75rem', color: '#64748b' }}>
-                <input type="checkbox" checked={includeThinkingInContext} onChange={e => setIncludeThinkingInContext(e.target.checked)} />
-                Include in context
-              </label>
-            </div>
             <span style={{ fontSize: '0.7rem', color: '#94a3b8' }}>{activeProfile.name} • {activeProfile.model}</span>
           </div>
         </div>
