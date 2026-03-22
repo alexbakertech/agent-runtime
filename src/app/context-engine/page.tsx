@@ -304,11 +304,13 @@ export default function ContextEngine() {
               </button>
             </div>
             
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <input type="checkbox" checked={includeThinkingInContext} onChange={e => setIncludeThinkingInContext(e.target.checked)} />
-              <span style={{ fontSize: '0.7rem', color: '#64748b' }}>Include thinking in context</span>
-            </div>
-            
+              {!historyCollapsed && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <input type="checkbox" checked={includeThinkingInContext} onChange={e => setIncludeThinkingInContext(e.target.checked)} />
+                  <span style={{ fontSize: '0.7rem', color: '#64748b' }}>Include thinking in context</span>
+                </div>
+              )}
+              
               {!historyCollapsed && (
                 advancedMode ? (
                   <pre style={{ margin: 0, padding: '0.75rem', backgroundColor: '#1e293b', color: '#e2e8f0', borderRadius: '6px', fontSize: '0.7rem', whiteSpace: 'pre-wrap' }}>
@@ -342,7 +344,7 @@ export default function ContextEngine() {
                               <span style={{ fontSize: '0.65rem', fontWeight: 800, color: '#94a3b8' }}>USER (T-{idx})</span>
                               <button 
                                 onClick={() => resetTurn(idx)}
-                                style={{ fontSize: '0.6rem', cursor: 'pointer', color: '#ef4444', background: 'none', border: 'none', fontWeight: 600 }}
+                                style={{ fontSize: '0.7rem', cursor: 'pointer', color: '#ef4444', background: 'none', border: '1px solid #fee2e2', padding: '0.2rem 0.5rem', borderRadius: '4px' }}
                               >
                                 Reset
                               </button>
@@ -423,7 +425,7 @@ export default function ContextEngine() {
                           style={{ width: '100%', border: 'none', background: 'none', fontSize: '0.8rem', resize: 'vertical', outline: 'none', fontFamily: 'inherit', minHeight: '40px' }}
                         />
                         
-                        {/* Exclusion buttons */}
+                          {/* Exclusion buttons */}
                         <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.25rem' }}>
                           <button 
                             onClick={() => setOverrides(prev => ({ ...prev, [idx]: { ...prev[idx], excluded: !ovr?.excluded, reasoningExcluded: !ovr?.excluded ? true : prev[idx]?.reasoningExcluded } }))}
@@ -431,7 +433,7 @@ export default function ContextEngine() {
                           >
                             {ovr?.excluded ? 'INCLUDE' : 'EXCLUDE'}
                           </button>
-                          {msg.reasoningContent && (
+                          {msg.reasoningContent && includeThinkingInContext && (
                             <button 
                               onClick={() => setOverrides(prev => ({ ...prev, [idx]: { ...prev[idx], reasoningExcluded: !prev[idx]?.reasoningExcluded } }))}
                               style={{ fontSize: '0.65rem', cursor: 'pointer', border: '1px solid #e2e8f0', background: '#fff', borderRadius: '4px', padding: '0.2rem 0.4rem' }}
@@ -535,18 +537,6 @@ export default function ContextEngine() {
                       </div>
                     )}
 
-                    {/* SHOW THINKING OVERRIDE WHEN EDITED/EXCLUDED (but not excluded by main toggle) */}
-                    {(isThinkingEdited || isThinkingExcluded) && !isExcluded && msg.reasoningContent && (
-                      <div style={{ marginTop: '0.5rem', marginBottom: '0.5rem', padding: '0.5rem', borderLeft: '3px solid #f59e0b', backgroundColor: '#fffbeb', borderRadius: '0 4px 4px 0' }}>
-                        <div style={{ fontSize: '0.65rem', fontWeight: 700, color: '#b45309', marginBottom: '0.25rem', textTransform: 'uppercase' }}>
-                          {isThinkingExcluded ? 'Thinking Excluded' : 'Thinking Override'}
-                        </div>
-                        <div style={{ whiteSpace: 'pre-wrap', fontSize: '0.85rem', color: '#94a3b8', fontStyle: 'italic' }}>
-                          {isThinkingEdited ? ovr.reasoningContent : '[Thinking excluded from context]'}
-                        </div>
-                      </div>
-                    )}
-
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                       <div style={{ 
                         whiteSpace: 'pre-wrap', 
@@ -559,12 +549,6 @@ export default function ContextEngine() {
                         {msg.content || (chatStatus === 'loading' && i === transcript.length - 1 ? '...' : '')}
                       </div>
                       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', marginLeft: '1rem' }}>
-                        <button 
-                          onClick={() => setOverrides(prev => ({ ...prev, [i]: { ...prev[i], excluded: !ovr?.excluded, reasoningExcluded: !ovr?.excluded ? true : prev[i]?.reasoningExcluded } }))}
-                          style={{ fontSize: '0.65rem', cursor: 'pointer', border: '1px solid #e2e8f0', background: '#fff', borderRadius: '4px', padding: '0.2rem 0.4rem', whiteSpace: 'nowrap' }}
-                        >
-                          {ovr?.excluded ? 'INCLUDE' : 'EXCLUDE'}
-                        </button>
                         {isUser && msg.contextSnapshot && (
                           <button 
                             onClick={() => setViewingSnapshotIndex(showSnapshot ? null : i)}
