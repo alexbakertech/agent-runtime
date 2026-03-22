@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { testConnection, fetchModels, chatStream, setBrowserConsent, isBrowserConsentGiven, BrowserConsentRequiredError } from '@/lib/api/client';
+import { testConnection, fetchModels, chatStreamWithReasoning, setBrowserConsent, isBrowserConsentGiven, BrowserConsentRequiredError } from '@/lib/api/client';
 
 const PROFILES_KEY = 'agent_runtime_profiles';
 
@@ -15,6 +15,7 @@ interface Config {
 interface Message {
   role: 'user' | 'assistant';
   content: string;
+  reasoningContent?: string;
 }
 
 export default function Home() {
@@ -44,6 +45,7 @@ export default function Home() {
   const [chatStatus, setChatStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [expandedThinking, setExpandedThinking] = useState<Record<number, boolean>>({});
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -210,22 +212,26 @@ export default function Home() {
     setChatStatus('loading');
     
     setMessages(prev => [...prev, { role: 'user', content: currentInput }]);
-    setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+    setMessages(prev => [...prev, { role: 'assistant', content: '', reasoningContent: '' }]);
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
     try {
-      for await (const chunk of chatStream(config, currentInput)) {
+      for await (const chunk of chatStreamWithReasoning(config, currentInput)) {
         if (controller.signal.aborted) break;
         setMessages(prev => {
           const newMessages = [...prev];
           const lastIdx = newMessages.length - 1;
           if (newMessages[lastIdx].role === 'assistant') {
-            newMessages[lastIdx] = {
-              ...newMessages[lastIdx],
-              content: newMessages[lastIdx].content + chunk
-            };
+            const updated = { ...newMessages[lastIdx] };
+            if (chunk.content) {
+              updated.content = updated.content + chunk.content;
+            }
+            if (chunk.reasoning) {
+              updated.reasoningContent = (updated.reasoningContent || '') + chunk.reasoning;
+            }
+            newMessages[lastIdx] = updated;
           }
           return newMessages;
         });
@@ -436,13 +442,52 @@ export default function Home() {
                       flexShrink: 0,
                       marginTop: '4px'
                     }}>{msg.role === 'user' ? 'U' : 'AI'}</div>
-                    <div style={{ 
-                      whiteSpace: 'pre-wrap', 
-                      lineHeight: 1.6, 
-                      fontSize: '1.05rem', 
-                      color: '#1e293b'
-                    }}>
-                      {msg.content}
+                    <div style={{ flex: 1 }}>
+                      {msg.role === 'assistant' && msg.reasoningContent && (
+                        <div style={{ marginBottom: '0.75rem' }}>
+                          <button
+                            onClick={() => setExpandedThinking(prev => ({ ...prev, [i]: !prev[i] }))}
+                            style={{
+                              fontSize: '0.75rem',
+                              color: '#94a3b8',
+                              background: 'none',
+                              border: 'none',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.3rem',
+                              padding: 0,
+                              marginBottom: '0.25rem'
+                            }}
+                          >
+                            {expandedThinking[i] ? '▼' : '▶'} Thinking ({msg.reasoningContent.length} chars)
+                          </button>
+                          {expandedThinking[i] && (
+                            <pre style={{
+                              margin: 0,
+                              padding: '0.75rem',
+                              fontSize: '0.85rem',
+                              whiteSpace: 'pre-wrap',
+                              fontFamily: 'monospace',
+                              color: '#94a3b8',
+                              fontStyle: 'italic',
+                              backgroundColor: '#f8fafc',
+                              borderRadius: '6px',
+                              border: '1px solid #e2e8f0'
+                            }}>
+                              {msg.reasoningContent}
+                            </pre>
+                          )}
+                        </div>
+                      )}
+                      <div style={{ 
+                        whiteSpace: 'pre-wrap', 
+                        lineHeight: 1.6, 
+                        fontSize: '1.05rem', 
+                        color: '#1e293b'
+                      }}>
+                        {msg.content}
+                      </div>
                     </div>
                   </div>
                 ))}

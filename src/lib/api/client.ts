@@ -96,3 +96,35 @@ export async function* chatStream(config: ApiConfig, message: string): AsyncGene
     if (reasoning) yield reasoning;
   }
 }
+
+export interface ChatChunk {
+  content?: string;
+  reasoning?: string;
+}
+
+export async function* chatStreamWithReasoning(config: ApiConfig, message: string): AsyncGenerator<ChatChunk, void, unknown> {
+  if (!isBrowserConsentGiven()) {
+    throw new BrowserConsentRequiredError();
+  }
+
+  const openai = new OpenAI({
+    baseURL: config.baseUrl,
+    apiKey: config.apiKey,
+    dangerouslyAllowBrowser: true,
+  });
+  const stream = await openai.chat.completions.create({
+    model: config.model || 'default',
+    messages: [{ role: 'user', content: message }],
+    stream: true,
+  });
+  for await (const chunk of stream) {
+    const delta = chunk.choices[0]?.delta as Record<string, string> | undefined;
+    if (delta?.content) {
+      yield { content: delta.content };
+    }
+    const reasoning = delta?.reasoning_content as string | undefined;
+    if (reasoning) {
+      yield { reasoning };
+    }
+  }
+}
