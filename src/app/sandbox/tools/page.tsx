@@ -73,17 +73,43 @@ type OverwriteConfirmState = {
   resolve: (confirm: boolean) => void;
 };
 
-const DEFAULT_CODE_TEMPLATE = `async function run({ args, helpers }) {
-  const { now, sleep, log } = helpers;
-  log("Initializing tool...");
-  
-  await sleep(100); 
+const TOOL_DEFAULT_CODE: Record<string, string> = {
+  get_time: `async function run({ args, helpers }) {
+  const { now, log } = helpers;
+  log("Fetching current time...");
   return { 
-    status: "success", 
-    received: args,
-    time: now() 
+    timestamp: now(),
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
   };
-}`;
+}`,
+  list_files: `async function run({ args, helpers }) {
+  const { dirPath = "." } = args;
+  const { log, listFiles } = helpers;
+  log(\`Listing files in: \${dirPath}\`);
+  const files = await listFiles(dirPath);
+  return { files, count: files.length };
+}`,
+  read_file: `async function run({ args, helpers }) {
+  const { filePath } = args;
+  const { log, readFile } = helpers;
+  log(\`Reading file: \${filePath}\`);
+  const file = await readFile(filePath);
+  return file;
+}`,
+  search_text: `async function run({ args, helpers }) {
+  const { pattern, dirPath = "." } = args;
+  const { log, searchFiles } = helpers;
+  log(\`Searching for: \${pattern} in \${dirPath}\`);
+  const results = await searchFiles(pattern, dirPath);
+  return { pattern, results, matchCount: results.length };
+}`,
+  custom_tool: `async function run({ args, helpers }) {
+  const { now, sleep, log } = helpers;
+  log("Running custom tool...");
+  await sleep(100); 
+  return { status: "success", received: args };
+}`
+};
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B';
@@ -150,7 +176,7 @@ export default function ToolsSandbox() {
         description: def.description,
         schemaText: JSON.stringify(def.parameters, null, 2),
         enabled: true,
-        code: DEFAULT_CODE_TEMPLATE
+        code: TOOL_DEFAULT_CODE[def.name] || TOOL_DEFAULT_CODE.custom_tool
       };
     });
     return initialDrafts;
@@ -225,7 +251,7 @@ export default function ToolsSandbox() {
           name: original.name,
           description: original.description,
           schemaText: JSON.stringify(original.parameters, null, 2),
-          code: DEFAULT_CODE_TEMPLATE
+          code: TOOL_DEFAULT_CODE[id] || TOOL_DEFAULT_CODE.custom_tool
         }
       }));
     }
@@ -257,22 +283,6 @@ export default function ToolsSandbox() {
   const handleValidate = (toolId: string) => {
     const result = validateArgs(toolId);
     setLastValidation(prev => ({ ...prev, [toolId]: { ok: result.ok, errors: result.errors } }));
-  };
-
-  const builtInTools: Record<string, (args: any) => Promise<any>> = {
-    get_time: async () => new Date().toISOString(),
-    list_files: async (args: { dirPath?: string }) => {
-      const files = await listFiles(args.dirPath || '');
-      return files.map(f => ({ name: f.name, type: f.type }));
-    },
-    read_file: async (args: { filePath: string }) => {
-      const file = await readFile(args.filePath);
-      if (!file) throw new Error('File not found');
-      return { name: file.name, content: file.content };
-    },
-    search_text: async (args: { pattern: string; dirPath?: string }) => {
-      return searchInFiles(args.pattern, { dirPath: args.dirPath });
-    },
   };
 
   const handleExecute = async (toolId: string) => {
@@ -323,19 +333,26 @@ export default function ToolsSandbox() {
         const helpers = {
           now: () => new Date().toISOString(),
           sleep: (ms: number) => new Promise(r => setTimeout(r, ms)),
-          log: (msg: string) => addStep(`[Action Log] ${msg}`, "info")
+          log: (msg: string) => addStep(`[Action Log] ${msg}`, "info"),
+          listFiles: async (dirPath: string) => {
+            const files = await listFiles(dirPath);
+            return files.map(f => ({ name: f.name, type: f.type }));
+          },
+          readFile: async (filePath: string) => {
+            const file = await readFile(filePath);
+            if (!file) throw new Error('File not found');
+            return { name: file.name, content: file.content };
+          },
+          searchFiles: async (pattern: string, dirPath: string = ".") => {
+            return searchInFiles(pattern, { dirPath });
+          }
         };
 
-        if (builtInTools[toolId]) {
-          addStep(`Running built-in: ${toolId}`, "info");
-          result = await builtInTools[toolId](parsedArgs);
-        } else {
-          const runner = new Function('args', 'helpers', `
-            ${draft.code}
-            return run({ args, helpers });
-          `);
-          result = await runner(parsedArgs, helpers);
-        }
+        const runner = new Function('args', 'helpers', `
+          ${draft.code}
+          return run({ args, helpers });
+        `);
+        result = await runner(parsedArgs, helpers);
         addStep("Execution complete", "success");
       } catch (e: any) {
         addStep("Runtime error", "error", e.message);
@@ -636,7 +653,7 @@ export default function ToolsSandbox() {
               <section>
                 <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.75rem' }}>1. CLIENT IMPLEMENTATION</h3>
                 <textarea 
-                  key={selectedToolId}
+                  key={`code-${selectedToolId}`}
                   value={selectedTool.code} 
                   onChange={(e) => updateToolDraft(selectedToolId!, { code: e.target.value })}
                   style={{ width: '100%', padding: '1rem', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.8rem', fontFamily: 'monospace', minHeight: '250px', backgroundColor: '#1e293b', color: '#e2e8f0' }}
