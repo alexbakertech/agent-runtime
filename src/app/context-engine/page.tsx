@@ -160,6 +160,13 @@ export default function ContextEngine() {
     return next;
   });
   const toggleStageExpansion = (stage: string) => setExpandedStages(prev => ({ ...prev, [stage]: !prev[stage] }));
+  const handleHistoryEnabledChange = (enabled: boolean) => {
+    setHistoryEnabled(enabled);
+    if (!enabled) {
+      setIncludeThinkingInContext(false);
+      setHistoryCollapsed(true);
+    }
+  };
 
   const handleChat = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -296,15 +303,15 @@ export default function ContextEngine() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <input type="checkbox" checked={historyEnabled} onChange={e => setHistoryEnabled(e.target.checked)} />
+                <input type="checkbox" checked={historyEnabled} onChange={e => handleHistoryEnabledChange(e.target.checked)} />
                 <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b' }}>ACTIVE CONTEXT CHAIN</span>
               </div>
-              <button onClick={() => setHistoryCollapsed(!historyCollapsed)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.7rem', color: '#94a3b8' }}>
+              <button onClick={() => setHistoryCollapsed(!historyCollapsed)} disabled={!historyEnabled} style={{ background: 'none', border: 'none', cursor: historyEnabled ? 'pointer' : 'not-allowed', fontSize: '0.7rem', color: historyEnabled ? '#94a3b8' : '#cbd5e1' }}>
                 {historyCollapsed ? 'EXPAND' : 'COLLAPSE'}
               </button>
             </div>
             
-              {!historyCollapsed && (
+              {!historyCollapsed && historyEnabled && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   <input type="checkbox" checked={includeThinkingInContext} onChange={e => setIncludeThinkingInContext(e.target.checked)} />
                   <span style={{ fontSize: '0.7rem', color: '#64748b' }}>Include thinking in context</span>
@@ -485,6 +492,33 @@ export default function ContextEngine() {
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '2rem' }}>
           <div style={{ maxWidth: '700px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2.5rem' }}>
+            {(!prefixEnabled || !historyEnabled || !includeThinkingInContext) && (
+              <div style={{ 
+                display: 'flex', 
+                flexWrap: 'wrap', 
+                gap: '0.75rem', 
+                padding: '0.75rem 1rem',
+                backgroundColor: '#fefce8',
+                borderRadius: '8px',
+                border: '1px solid #fef08a'
+              }}>
+                {!prefixEnabled && (
+                  <span style={{ fontSize: '0.7rem', color: '#7c3aed', fontWeight: 600 }}>
+                    [System prompt excluded]
+                  </span>
+                )}
+                {!historyEnabled && (
+                  <span style={{ fontSize: '0.7rem', color: '#dc2626', fontWeight: 600 }}>
+                    [History excluded]
+                  </span>
+                )}
+                {!includeThinkingInContext && (
+                  <span style={{ fontSize: '0.7rem', color: '#d97706', fontWeight: 600 }}>
+                    [Thinking excluded]
+                  </span>
+                )}
+              </div>
+            )}
             {transcript.map((msg, i) => {
               const ovr = overrides[i];
               const isUser = msg.role === 'user';
@@ -570,9 +604,24 @@ export default function ContextEngine() {
                       </div>
                     )}
 
+                    {isThinkingEdited && !isThinkingExcluded && !isExcluded && (
+                      <div style={{ marginTop: '0.75rem', padding: '0.75rem', borderLeft: '3px solid #d97706', backgroundColor: '#fffbeb', borderRadius: '0 4px 4px 0' }}>
+                        <div style={{ fontSize: '0.65rem', fontWeight: 700, color: '#b45309', marginBottom: '0.25rem', textTransform: 'uppercase' }}>Thinking Override:</div>
+                        <div style={{ whiteSpace: 'pre-wrap', fontSize: '0.8rem', color: '#94a3b8', fontStyle: 'italic' }}>
+                          {ovr.reasoningContent}
+                        </div>
+                      </div>
+                    )}
+
                     {isExcluded && (
                       <div style={{ marginTop: '0.4rem', fontSize: '0.7rem', color: '#ef4444', fontWeight: 600 }}>
                         [ EXCLUDED FROM NEXT RUN ]
+                      </div>
+                    )}
+
+                    {!isExcluded && isThinkingExcluded && msg.reasoningContent && (
+                      <div style={{ marginTop: '0.4rem', fontSize: '0.7rem', color: '#d97706', fontWeight: 600 }}>
+                        [ THINKING EXCLUDED FROM NEXT RUN ]
                       </div>
                     )}
 
