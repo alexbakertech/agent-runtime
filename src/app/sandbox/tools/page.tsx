@@ -251,10 +251,21 @@ export default function ToolsSandbox() {
   const [trace, setTrace] = useState<ToolTraceEntry[]>([]);
   const [expandedTraceIds, setExpandedTraceIds] = useState<Set<string>>(new Set());
   const [lastValidation, setLastValidation] = useState<Record<string, { ok: boolean, errors: string[] }>>({});
+  
+  // Local state for custom tool invocation (keyed by custom tool id)
+  const [customInvocationDrafts, setCustomInvocationDrafts] = useState<Record<string, ToolInvocationDraft>>({});
 
   const selectedTool = localSelectedToolId ? toolDrafts[localSelectedToolId] : null;
   const selectedCustomTool = customTools.find(t => t.id === localSelectedToolId) || null;
-  const selectedInvocation = localSelectedToolId ? invocationDrafts[localSelectedToolId] : null;
+  const selectedInvocation = selectedTool ? (localSelectedToolId ? invocationDrafts[localSelectedToolId] : null) : null;
+  const selectedCustomInvocation = selectedCustomTool ? (customInvocationDrafts[selectedCustomTool.id] || { argsText: "{}" }) : { argsText: "{}" };
+
+  const updateCustomInvocationDraft = (id: string, updates: Partial<ToolInvocationDraft>) => {
+    setCustomInvocationDrafts(prev => ({
+      ...prev,
+      [id]: { ...prev[id], ...updates, id }
+    }));
+  };
 
   const updateToolDraft = (id: string, updates: Partial<ToolDraft>) => {
     setToolDrafts(prev => ({
@@ -312,6 +323,133 @@ export default function ToolsSandbox() {
   const handleValidate = (toolId: string) => {
     const result = validateArgs(toolId);
     setLastValidation(prev => ({ ...prev, [toolId]: { ok: result.ok, errors: result.errors } }));
+  };
+
+  const validateCustomTool = (tool: CustomTool, argsText: string) => {
+    let errors: string[] = [];
+    let parsedArgs: any = null;
+
+    try {
+      parsedArgs = JSON.parse(argsText);
+      const params = tool.parameters as { required?: string[] };
+      if (params.required) {
+        params.required.forEach((req: string) => {
+          if (!(req in parsedArgs)) {
+            errors.push(`Missing required parameter: ${req}`);
+          }
+        });
+      }
+    } catch (e: any) {
+      errors.push(`JSON Parse Error: ${e.message}`);
+    }
+
+    return { ok: errors.length === 0, errors, parsedArgs };
+  };
+
+  const handleCustomValidate = () => {
+    if (!selectedCustomTool) return;
+    const result = validateCustomTool(selectedCustomTool, selectedCustomInvocation.argsText);
+    setLastValidation(prev => ({ ...prev, [selectedCustomTool.id]: { ok: result.ok, errors: result.errors } }));
+  };
+
+  const handleCustomExecute = async () => {
+    if (!selectedCustomTool || !selectedCustomInvocation) return;
+    
+    const invocation = selectedCustomInvocation;
+    const steps: ExecutionStep[] = [];
+    const addStep = (label: string, status: 'info' | 'success' | 'error', details?: string) => {
+      steps.push({ label, status, details, timestamp: new Date().toLocaleTimeString() });
+    };
+
+    const pipelineState: ExecutionPipelineState = {
+      rawArgsText: invocation.argsText,
+      validation: { ok: true, errors: [] },
+      active: true
+    };
+
+    addStep("Initializing custom tool execution", "info");
+    addStep("Capturing raw input", "info");
+    addStep("Parsing arguments JSON", "info");
+
+    let parseError: string | null = null;
+    let parsedArgs: any = null;
+
+    try {
+      parsedArgs = JSON.parse(invocation.argsText);
+    } catch (e: any) {
+      parseError = e.message;
+      addStep("JSON Parse Error", "error", e.message);
+    }
+
+    const { ok, errors } = validateCustomTool(selectedCustomTool, invocation.argsText);
+    pipelineState.validation = { ok, errors };
+    if (!ok) {
+      addStep("Argument validation failed", "error", errors.join(", "));
+    } else {
+      addStep("Argument validation successful", "success");
+    }
+
+    const entryId = Math.random().toString(36).substring(7);
+    const timestamp = new Date().toLocaleTimeString();
+
+    let result = null;
+    let error = null;
+
+    if (parseError || !ok) {
+      error = parseError || "Validation failed.";
+    } else {
+      addStep("Executing client action", "info");
+      try {
+        const helpers = {
+          now: () => new Date().toISOString(),
+          sleep: (ms: number) => new Promise(r => setTimeout(r, ms)),
+          log: (msg: string) => addStep(`[Action Log] ${msg}`, "info"),
+          listFiles: async (dirPath: string) => {
+            const files = await listFiles(dirPath);
+            return files.map(f => ({ name: f.name, type: f.type }));
+          },
+          readFile: async (filePath: string) => {
+            const file = await readFile(filePath);
+            if (!file) throw new Error('File not found');
+            return { name: file.name, content: file.content };
+          },
+          searchFiles: async (pattern: string, dirPath: string = ".") => {
+            return searchInFiles(pattern, { dirPath });
+          }
+        };
+
+        const runner = new Function('args', 'helpers', `
+          ${selectedCustomTool.code}
+          return run({ args, helpers });
+        `);
+        result = await runner(parsedArgs, helpers);
+        addStep("Execution complete", "success");
+      } catch (e: any) {
+        addStep("Runtime error", "error", e.message);
+        error = e.message;
+      }
+    }
+
+    pipelineState.result = result;
+    pipelineState.error = error;
+    setPipeline(pipelineState);
+
+    addStep("Cycle complete", error ? "error" : "success");
+
+    const newEntry: ToolTraceEntry = {
+      id: entryId,
+      timestamp,
+      toolName: selectedCustomTool.name,
+      argsText: invocation.argsText,
+      parsedArgs,
+      validation: { ok, errors },
+      result,
+      error,
+      steps
+    };
+
+    setTrace(prev => [newEntry, ...prev]);
+    setExpandedTraceIds(prev => new Set(prev).add(entryId));
   };
 
   // Custom tool handlers
@@ -911,13 +1049,44 @@ export default function ToolsSandbox() {
                       style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #fcd34d', fontSize: '0.75rem', fontFamily: 'monospace', minHeight: '100px' }}
                     />
                   </section>
+
+                  <section>
+                    <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#f59e0b', marginBottom: '0.75rem' }}>5. INVOCATION SIMULATOR</h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <label style={{ fontSize: '0.65rem', fontWeight: 700, color: '#64748b' }}>ARGUMENTS (JSON)</label>
+                          <button 
+                            onClick={() => updateCustomInvocationDraft(selectedCustomTool.id, { argsText: "{}" })} 
+                            style={{ fontSize: '0.65rem', padding: '0.1rem 0.3rem', border: '1px solid #fcd34d', background: '#fff', borderRadius: '4px', cursor: 'pointer' }}
+                          >
+                            Empty
+                          </button>
+                        </div>
+                        <textarea 
+                          value={selectedCustomInvocation.argsText}
+                          onChange={(e) => updateCustomInvocationDraft(selectedCustomTool.id, { argsText: e.target.value })}
+                          style={{ padding: '0.5rem', borderRadius: '4px', border: '1px solid #fcd34d', fontSize: '0.8rem', fontFamily: 'monospace', minHeight: '100px' }}
+                        />
+                        {lastValidation[selectedCustomTool.id] && (
+                          <div style={{ fontSize: '0.75rem', color: lastValidation[selectedCustomTool.id].ok ? '#10b981' : '#ef4444' }}>
+                            {lastValidation[selectedCustomTool.id].ok ? 'Valid' : `Errors: ${lastValidation[selectedCustomTool.id].errors.join(', ')}`}
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', gap: '1rem' }}>
+                        <button onClick={handleCustomValidate} style={{ flex: 1, padding: '0.75rem', border: '1px solid #fcd34d', backgroundColor: '#fff', color: '#92400e', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}>VALIDATE</button>
+                        <button onClick={handleCustomExecute} style={{ flex: 2, padding: '0.75rem', backgroundColor: '#92400e', color: '#fff', borderRadius: '8px', fontWeight: 700, cursor: 'pointer', border: 'none' }}>RUN ACTION</button>
+                      </div>
+                    </div>
+                  </section>
                 </>
               )}
 
-              {/* 3. PIPELINE & RESULT (common for both) */}
+              {/* 3/5. PIPELINE & RESULT (common for both) */}
               <section style={{ opacity: pipeline.active ? 1 : 0.5 }}>
                 <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.75rem' }}>
-                  {selectedCustomTool ? '5' : '3'}. EXECUTION PIPELINE
+                  {selectedCustomTool ? '6' : '3'}. EXECUTION PIPELINE
                 </h3>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', backgroundColor: '#f1f5f9', padding: '1rem', borderRadius: '8px' }}>
                   {[
