@@ -1,125 +1,111 @@
 # Agent Runtime
 
-> A transparent runtime for tool-augmented LLM agents, designed for iterative development and system-level control.
+> A transparent runtime and debugging environment for tool-augmented LLM agents, designed for iterative development and system-level control.
 
 ## Status
 
-**Planning — v0.1 Design Phase**
+**Active Development — Implementation Phase**
 
-This repository is currently focused on defining a minimal, deterministic agent harness before implementation begins.
-
-The goal of this phase is to establish:
-- a clear execution model
-- strict system boundaries
-- a small, well-defined tool surface
-- observable and debuggable behavior
+Core runtime features are implemented as a Next.js application at the repository root. The project is focused on providing a minimal, deterministic agent harness with strict system boundaries and observable behavior.
 
 ## Objective
 
-Design and implement a **local-first agent runtime** that:
+Design and implement a **local-first agent runtime and development environment** that:
 
 - operates through a controlled execution loop  
-- allows a model to request tools when needed  
-- enforces validation and execution boundaries  
-- produces fully inspectable execution traces  
+- enables explicit tool interaction and validation  
+- provides full visibility into prompt construction and execution  
+- supports step-by-step inspection and intervention  
+- exposes internal state for debugging and refinement  
 
-This project prioritizes **control and transparency** over abstraction.
+This project prioritizes **control, transparency, and inspectability** over abstraction.
 
-## v0.1 Scope
+## Getting Started
+
+### Prerequisites
+
+- Node.js (v18 or higher)
+- npm or yarn
+
+### Installation
+
+```bash
+npm install
+```
+
+### Running the App
+
+```bash
+npm run dev
+```
+
+The application will be available at [http://localhost:3000](http://localhost:3000).
+
+## Current Scope (v0.x)
 
 ### Included
 
 - single-agent execution loop  
-- local model integration (e.g., `llama.cpp`)  
-- small, read-only toolset  
+- local and OpenAI-compatible model integration  
+- context inspection and modification  
+- runtime step-through execution  
 - structured run state  
-- full trace logging  
-- validation and stop logic  
+- execution trace visibility  
+- integrated UI for chat and runtime interaction  
+- **Initial Toolset:** `list_files`, `read_file`, `search_text`, `get_time`
 
-### Explicitly Excluded
+### Explicitly Excluded (for now)
 
-- long-term memory  
+- long-term memory systems  
 - vector search / embeddings  
-- subagents or planners  
-- external APIs  
-- write/delete operations  
-- autonomous background execution  
+- multi-agent orchestration  
+- persistent autonomous execution  
+- production deployment infrastructure  
 
-## Architecture Plan (v0.1)
+## Architecture Direction
 
-The system will be implemented as a small set of explicit components:
+The system is organized into focused, composable components:
 
-- /runtime # agent loop and orchestration
-- /adapters # model interface (llama.cpp)
-- /tools # tool definitions
-- /executors # tool implementations
-- /state # run context tracking
-- /logging # execution trace
-- /validation # guardrails and checks
+- `/src/app/api`  
+  API routes for chat, model selection, and connection testing.
 
-Each component will be implemented independently to maintain clarity and control.
+- `/src/lib/tools`  
+  Tool definition, validation, and implementation.
 
-## Execution Model (Planned)
+- `/src/app/context-engine`  
+  Context management and inspection interface.
 
-The runtime will operate as a bounded loop:
+- `/src/app/configure`  
+  System configuration and setup.
+
+## Execution Model
+
+The runtime operates as a bounded, inspectable loop:
 
 1. Receive user input  
-2. Send context + tool definitions to the model  
-3. Inspect model output  
-4. If a tool is requested:
+2. Compile context (system prompt + messages + tool definitions)  
+3. Send request to model  
+4. Inspect model output  
+5. If a tool is requested:
    - validate the request  
    - execute the tool  
    - append result to state  
-5. Repeat until:
+6. Repeat until:
    - a final answer is produced, or  
    - a termination condition is met  
 
-## Initial Tool Set (Planned)
+## Repository Structure
 
-The first version will include a minimal, deterministic set of tools:
+- `/src/app`: Next.js application pages and API routes.
+- `/src/lib`: Shared libraries and core logic.
+- `/src/lib/tools`: Tool implementation modules.
+- `/public`: Static assets.
+- `package.json`: Project dependencies and scripts.
 
-- `list_files`  
-- `read_file`  
-- `search_text`  
-- `get_time`  
+## License
 
-All tools will be:
-- read-only  
-- scoped  
-- predictable in output  
-
-## Execution Constraints (v0.1)
-
-- maximum **5–8 steps per run**  
-- strict validation of all tool calls  
-- bounded tool output  
-- no background or recursive execution  
-
-## Success Criteria
-
-v0.1 will be considered complete when the runtime can:
-
-- correctly select and invoke tools  
-- chain simple tool calls when required  
-- avoid hallucinating data not retrieved  
-- terminate cleanly without unnecessary looping  
-- produce a clear, inspectable execution trace  
-
-## Development Approach
-
-This project will be developed incrementally:
-
-- define → implement → observe → refine  
-
-The focus is on building a system that is:
-- predictable  
-- debuggable  
-- extensible through iteration  
-
-## Repository Strategy
-
-- `dev` — active development  
-- `main` — curated, stable snapshots  
+This project is licensed under the Apache License, Version 2.0.  
+See the [LICENSE](LICENSE) file for details.
 
 ## Author
 
