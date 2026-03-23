@@ -164,7 +164,7 @@ export default function ToolsSandbox() {
     expandedTools,
     builtInToolsExpanded,
     userToolsExpanded,
-    customTools
+    customTools = []
   } = sandbox;
 
   const [sandboxFiles, setSandboxFiles] = useState<FileEntry[]>([]);
