@@ -225,6 +225,9 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
       active: false,
     },
     expandedTools: [],
+    builtInToolsExpanded: true,
+    userToolsExpanded: true,
+    customTools: [],
   };
 
   const updateSandbox = useCallback((updates: Partial<SandboxState>) => {

@@ -61,6 +61,9 @@ function createDefaultSandboxState(): SandboxState {
     invocationDrafts: {},
     pipeline: createDefaultExecutionPipelineState(),
     expandedTools: [],
+    builtInToolsExpanded: true,
+    userToolsExpanded: true,
+    customTools: [],
   };
 }
 

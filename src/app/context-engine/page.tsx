@@ -220,6 +220,16 @@ export default function ContextEngine() {
     });
   }, [overrides, updateContextEngine]);
 
+  const clearContext = useCallback(() => {
+    updateContextEngine({
+      transcript: [],
+      overrides: {},
+      expandedThinking: {},
+      expandedContextThinking: {},
+      viewingSnapshotIndex: null,
+    });
+  }, [updateContextEngine]);
+
   const toggleStageExpansion = useCallback((stage: string) => {
     updateContextEngine({ expandedStages: { ...expandedStages, [stage]: !expandedStages[stage] } });
   }, [expandedStages, updateContextEngine]);
@@ -361,9 +371,16 @@ export default function ContextEngine() {
               </button>
             )}
             {!showContextPreview && (
-              <button onClick={resetOverrides} style={{ fontSize: '0.7rem', cursor: 'pointer', color: '#ef4444', background: 'none', border: '1px solid #fee2e2', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
-                Reset
-              </button>
+              <>
+                <button onClick={resetOverrides} style={{ fontSize: '0.7rem', cursor: 'pointer', color: '#ef4444', background: 'none', border: '1px solid #fee2e2', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
+                  Reset
+                </button>
+                {transcript.length > 0 && (
+                  <button onClick={clearContext} style={{ fontSize: '0.7rem', cursor: 'pointer', color: '#dc2626', background: 'none', border: '1px solid #fecaca', padding: '0.2rem 0.5rem', borderRadius: '4px', fontWeight: 600 }}>
+                    Clear Context
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>

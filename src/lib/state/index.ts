@@ -23,6 +23,7 @@ export type {
   ImportPreview,
   ToolTraceEntry,
   ToolTraceStep,
+  CustomTool,
 } from './types';
 
 // Constants

@@ -201,6 +201,44 @@ export interface SandboxState {
   
   /** IDs of expanded tool sections */
   expandedTools: string[];
+  
+  /** Whether built-in tools section is expanded */
+  builtInToolsExpanded: boolean;
+  
+  /** Whether user tools section is expanded */
+  userToolsExpanded: boolean;
+  
+  /** User-defined custom tools */
+  customTools: CustomTool[];
+}
+
+/**
+ * A user-defined custom tool.
+ */
+export interface CustomTool {
+  /** Unique identifier */
+  id: string;
+  
+  /** Tool display name */
+  name: string;
+  
+  /** Human-readable description */
+  description: string;
+  
+  /** JSON Schema for tool parameters */
+  parameters: object;
+  
+  /** Tool implementation code */
+  code: string;
+  
+  /** Whether tool is enabled */
+  enabled: boolean;
+  
+  /** ISO timestamp of creation */
+  createdAt: string;
+  
+  /** ISO timestamp of last update */
+  updatedAt: string;
 }
 
 /**
