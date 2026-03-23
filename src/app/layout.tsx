@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import Link from 'next/link';
+import { StateProvider } from '@/lib/state';
 
 export const metadata: Metadata = {
   title: "Agent Runtime",
@@ -47,8 +48,13 @@ export default function RootLayout({
           <Link href="/configure" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
             Configure & Test
           </Link>
+          <Link href="/export" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
+            Export
+          </Link>
         </nav>
-        {children}
+        <StateProvider>
+          {children}
+        </StateProvider>
       </body>
     </html>
   );

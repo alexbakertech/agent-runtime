@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, DragEvent } from 'react';
+import { useSandbox } from '@/lib/state';
 import { toolDefinitions } from '@/lib/tools/definitions';
 import { 
   listFiles, 
@@ -156,7 +157,12 @@ async function getFilesFromDataTransfer(items: DataTransferItemList, basePath: s
 }
 
 export default function ToolsSandbox() {
-  const [selectedToolId, setSelectedToolId] = useState<string | null>(null);
+  const { sandbox, updateSandbox } = useSandbox();
+  const {
+    selectedToolId,
+    expandedTools
+  } = sandbox;
+
   const [sandboxFiles, setSandboxFiles] = useState<FileEntry[]>([]);
   const [isRefreshingFiles, setIsRefreshingFiles] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -168,6 +174,7 @@ export default function ToolsSandbox() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
 
+  // Local state for sandbox (not persisted - tool code, invocation args, trace)
   const [toolDrafts, setToolDrafts] = useState<Record<string, ToolDraft>>(() => {
     const initialDrafts: Record<string, ToolDraft> = {};
     toolDefinitions.forEach(def => {
@@ -181,6 +188,20 @@ export default function ToolsSandbox() {
     });
     return initialDrafts;
   });
+
+  // Local state for selected tool
+  const [localSelectedToolId, setLocalSelectedToolId] = useState<string | null>(selectedToolId);
+
+  // Sync local selectedToolId with context
+  useEffect(() => {
+    setLocalSelectedToolId(selectedToolId);
+  }, [selectedToolId]);
+
+  // Helper to update selected tool
+  const setSelectedToolId = (id: string | null) => {
+    setLocalSelectedToolId(id);
+    updateSandbox({ selectedToolId: id });
+  };
 
   const refreshSandboxFiles = async () => {
     setIsRefreshingFiles(true);
@@ -224,8 +245,8 @@ export default function ToolsSandbox() {
   const [expandedTraceIds, setExpandedTraceIds] = useState<Set<string>>(new Set());
   const [lastValidation, setLastValidation] = useState<Record<string, { ok: boolean, errors: string[] }>>({});
 
-  const selectedTool = selectedToolId ? toolDrafts[selectedToolId] : null;
-  const selectedInvocation = selectedToolId ? invocationDrafts[selectedToolId] : null;
+  const selectedTool = localSelectedToolId ? toolDrafts[localSelectedToolId] : null;
+  const selectedInvocation = localSelectedToolId ? invocationDrafts[localSelectedToolId] : null;
 
   const updateToolDraft = (id: string, updates: Partial<ToolDraft>) => {
     setToolDrafts(prev => ({
