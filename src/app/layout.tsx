@@ -49,7 +49,7 @@ export default function RootLayout({
             Configure & Test
           </Link>
           <Link href="/export" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
-            Export
+            State
           </Link>
         </nav>
         <StateProvider>
