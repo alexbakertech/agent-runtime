@@ -63,60 +63,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
       setError(result.error);
     }
     
-    const defaults = createDefaultState();
-    let loadedState = result.state || defaults;
-    
-    // Migrate old pageStates format to new pageAppStates + pageUIStates format
-    const stateAny = loadedState as unknown as Record<string, unknown>;
-    if ('pageStates' in stateAny && !('pageAppStates' in stateAny)) {
-      const oldPageStates = stateAny.pageStates as Record<string, unknown> | undefined;
-      
-      const newPageAppStates = { ...defaults.pageAppStates };
-      const newPageUIStates = { ...defaults.pageUIStates };
-      
-      if (oldPageStates?.contextEngine) {
-        const oldContextEngine = oldPageStates.contextEngine as Record<string, unknown>;
-        newPageAppStates.chatAgent = {
-          prefix: oldContextEngine.prefix as string,
-          prefixEnabled: oldContextEngine.prefixEnabled as boolean,
-          historyEnabled: oldContextEngine.historyEnabled as boolean,
-          transcript: oldContextEngine.transcript as never[],
-          overrides: oldContextEngine.overrides as Record<string, never>,
-        };
-        newPageUIStates.chatAgent = {
-          showContextPreview: oldContextEngine.showContextPreview as boolean,
-          expandedStages: oldContextEngine.expandedStages as Record<string, boolean>,
-          viewingSnapshotIndex: oldContextEngine.viewingSnapshotIndex as string | null,
-          prefixCollapsed: oldContextEngine.prefixCollapsed as boolean,
-          historyCollapsed: oldContextEngine.historyCollapsed as boolean,
-          expandedThinking: oldContextEngine.expandedThinking as Record<string, boolean>,
-          showFullPrompt: oldContextEngine.showFullPrompt as boolean,
-          expandedContextThinking: oldContextEngine.expandedContextThinking as Record<string, boolean>,
-        };
-      }
-      
-      if (oldPageStates?.sandbox) {
-        const oldSandbox = oldPageStates.sandbox as Record<string, unknown>;
-        newPageAppStates.sandbox = {
-          selectedToolId: oldSandbox.selectedToolId as string | null,
-          toolDrafts: oldSandbox.toolDrafts as Record<string, never>,
-          invocationDrafts: oldSandbox.invocationDrafts as Record<string, never>,
-          pipeline: oldSandbox.pipeline as never,
-          customTools: oldSandbox.customTools as never[],
-        };
-        newPageUIStates.sandbox = {
-          expandedTools: oldSandbox.expandedTools as string[],
-          builtInToolsExpanded: oldSandbox.builtInToolsExpanded as boolean,
-          userToolsExpanded: oldSandbox.userToolsExpanded as boolean,
-        };
-      }
-      
-      loadedState = {
-        ...loadedState,
-        pageAppStates: newPageAppStates,
-        pageUIStates: newPageUIStates,
-      };
-    }
+    const loadedState = result.state || createDefaultState();
     
     // Sync browser consent from localStorage (it may have been set before our state)
     const storedConsent = localStorage.getItem('allow_browser_api') === 'true';
