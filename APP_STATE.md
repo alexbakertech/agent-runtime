@@ -101,6 +101,7 @@ Manages chat transcript, message overrides, and UI state for the Context Engine.
 | `historyCollapsed` | `boolean` | UI state: history section collapsed |
 | `expandedThinking` | `Record<string, boolean>` | Which thinking sections are expanded |
 | `showFullPrompt` | `boolean` | Show full prompt in inspection view |
+| `expandedContextThinking` | `Record<string, boolean>` | UI state: expanded context thinking sections |
 
 ### TranscriptEntry
 
@@ -132,13 +133,31 @@ Configuration for modifying or excluding a transcript entry.
 
 Manages tool definitions and execution state for the Sandbox.
 
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `selectedToolId` | `string \| null` | `null` | Currently selected tool |
+| `toolDrafts` | `Record<string, ToolDraft>` | `{}` | Tool definitions keyed by ID |
+| `invocationDrafts` | `Record<string, ToolInvocationDraft>` | `{}` | Invocation drafts |
+| `pipeline` | `ExecutionPipelineState` | - | Current execution state |
+| `expandedTools` | `string[]` | `[]` | IDs of expanded tool sections |
+| `builtInToolsExpanded` | `boolean` | `true` | Whether built-in tools section is expanded |
+| `userToolsExpanded` | `boolean` | `true` | Whether user tools section is expanded |
+| `customTools` | `CustomTool[]` | `[]` | User-defined custom tools |
+
+### CustomTool
+
+A user-defined custom tool.
+
 | Field | Type | Description |
 |-------|------|-------------|
-| `selectedToolId` | `string \| null` | Currently selected tool |
-| `toolDrafts` | `Record<string, ToolDraft>` | Tool definitions keyed by ID |
-| `invocationDrafts` | `Record<string, ToolInvocationDraft>` | Invocation drafts |
-| `pipeline` | `ExecutionPipelineState` | Current execution state |
-| `expandedTools` | `string[]` | IDs of expanded tool sections |
+| `id` | `string` (UUID) | Unique identifier |
+| `name` | `string` | Tool display name |
+| `description` | `string` | Human-readable description |
+| `parameters` | `object` | JSON Schema for tool parameters |
+| `code` | `string` | Tool implementation code |
+| `enabled` | `boolean` | Whether tool is enabled |
+| `createdAt` | `string` (ISO) | Creation timestamp |
+| `updatedAt` | `string` (ISO) | Last modification timestamp |
 
 ### ToolDraft
 
@@ -154,6 +173,15 @@ A tool definition.
 | `enabled` | `boolean` | Whether tool is active |
 | `createdAt` | `string` (ISO) | Creation timestamp |
 | `updatedAt` | `string` (ISO) | Last modification timestamp |
+
+### ToolInvocationDraft
+
+A draft for invoking a tool with specific arguments.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | Unique identifier |
+| `argsText` | `string` | JSON string of tool arguments |
 
 ### ExecutionPipelineState
 
@@ -286,14 +314,18 @@ When no state exists in localStorage, the following defaults are created:
       prefixCollapsed: false,
       historyCollapsed: false,
       expandedThinking: {},
-      showFullPrompt: false
+      showFullPrompt: false,
+      expandedContextThinking: {}
     },
     sandbox: {
       selectedToolId: null,
       toolDrafts: {},
       invocationDrafts: {},
       pipeline: { /* empty state */ },
-      expandedTools: []
+      expandedTools: [],
+      builtInToolsExpanded: true,
+      userToolsExpanded: true,
+      customTools: []
     }
   }
 }
