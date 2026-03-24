@@ -743,15 +743,14 @@ export default function ToolsSandbox() {
               
               {/* BUILT-IN TOOLS COLLAPSIBLE SECTION */}
               <div style={{ marginBottom: '0.5rem' }}>
-                <button 
-                  onClick={toggleBuiltInTools}
-                  style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.5rem 0.75rem', backgroundColor: '#f1f5f9', border: '1px solid #e2e8f0', borderRadius: '6px', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 700, color: '#475569' }}
-                >
-                  <span>BUILT-IN TOOLS</span>
-                  <span>{builtInToolsExpanded ? '▼' : '▶'}</span>
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.5rem 0.75rem', backgroundColor: '#f1f5f9', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
+                  <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#475569' }}>BUILT-IN TOOLS</span>
+                  <button onClick={toggleBuiltInTools} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.7rem', color: '#94a3b8' }}>
+                    {builtInToolsExpanded ? 'COLLAPSE' : 'EXPAND'}
+                  </button>
+                </div>
                 {builtInToolsExpanded && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem', paddingLeft: '0.5rem' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
                     {builtInToolDefs.map(def => {
                       const isSelected = localSelectedToolId === def.name;
                       return (
@@ -777,15 +776,14 @@ export default function ToolsSandbox() {
 
               {/* USER TOOLS COLLAPSIBLE SECTION */}
               <div>
-                <button 
-                  onClick={toggleUserTools}
-                  style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.5rem 0.75rem', backgroundColor: '#fef3c7', border: '1px solid #fcd34d', borderRadius: '6px', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 700, color: '#92400e' }}
-                >
-                  <span>MY CUSTOM TOOLS ({customTools.length})</span>
-                  <span>{userToolsExpanded ? '▼' : '▶'}</span>
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.5rem 0.75rem', backgroundColor: '#f1f5f9', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
+                  <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#475569' }}>MY CUSTOM TOOLS ({customTools.length})</span>
+                  <button onClick={toggleUserTools} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.7rem', color: '#94a3b8' }}>
+                    {userToolsExpanded ? 'COLLAPSE' : 'EXPAND'}
+                  </button>
+                </div>
                 {userToolsExpanded && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem', paddingLeft: '0.5rem' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
                     {customTools.length === 0 ? (
                       <div style={{ fontSize: '0.7rem', color: '#94a3b8', textAlign: 'center', padding: '1rem' }}>
                         No custom tools yet. Click "+ Add Custom" to create one.
@@ -800,13 +798,13 @@ export default function ToolsSandbox() {
                             style={{ 
                               padding: '0.6rem', 
                               borderRadius: '6px', 
-                              border: `1px solid ${isSelected ? '#f59e0b' : '#fcd34d'}`,
-                              backgroundColor: isSelected ? '#fffbeb' : '#fff',
+                              border: `1px solid ${isSelected ? '#3b82f6' : '#e2e8f0'}`,
+                              backgroundColor: isSelected ? '#eff6ff' : '#fff',
                               cursor: 'pointer'
                             }}
                           >
-                            <div style={{ fontWeight: 700, fontSize: '0.8rem', color: isSelected ? '#b45309' : '#92400e' }}>{tool.name}</div>
-                            <div style={{ fontSize: '0.65rem', color: '#a16207' }}>{tool.description}</div>
+                            <div style={{ fontWeight: 700, fontSize: '0.8rem', color: isSelected ? '#1e40af' : '#1e293b' }}>{tool.name}</div>
+                            <div style={{ fontSize: '0.65rem', color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{tool.description}</div>
                           </div>
                         );
                       })
@@ -913,7 +911,7 @@ export default function ToolsSandbox() {
             <div style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fcfcfc' }}>
               <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800 }}>
                 {selectedCustomTool ? selectedCustomTool.name.toUpperCase() : selectedTool!.name.toUpperCase()} 
-                {selectedCustomTool && <span style={{ fontSize: '0.65rem', color: '#f59e0b', marginLeft: '0.5rem' }}>(Custom)</span>}
+                {selectedCustomTool && <span style={{ fontSize: '0.65rem', color: '#64748b', marginLeft: '0.5rem' }}>(Custom)</span>}
               </h2>
               <div style={{ display: 'flex', gap: '0.5rem' }}>
                 {selectedTool && (
@@ -940,167 +938,151 @@ export default function ToolsSandbox() {
 
             <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
               
-              {/* BUILT-IN TOOL EDITOR */}
-              {selectedTool && (
-                <>
-                  <section>
-                    <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.75rem' }}>1. CLIENT IMPLEMENTATION</h3>
+              {/* ROW 1: NAME (full width) */}
+              <section>
+                <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.5rem' }}>NAME</h3>
+                <input 
+                  type="text"
+                  value={selectedCustomTool ? selectedCustomTool.name : (selectedTool?.name || '')}
+                  onChange={(e) => selectedCustomTool && updateCustomTool(selectedCustomTool.id, { name: e.target.value })}
+                  readOnly={!selectedCustomTool}
+                  style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '0.8rem', backgroundColor: '#fff', color: '#1e293b' }}
+                />
+              </section>
+
+              {/* ROW 2: DESCRIPTION (full width) */}
+              <section>
+                <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.5rem' }}>DESCRIPTION</h3>
+                <input 
+                  type="text"
+                  value={selectedCustomTool ? selectedCustomTool.description : (selectedTool?.description || '')}
+                  onChange={(e) => selectedCustomTool && updateCustomTool(selectedCustomTool.id, { description: e.target.value })}
+                  readOnly={!selectedCustomTool}
+                  style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '0.8rem', backgroundColor: '#fff', color: '#1e293b' }}
+                />
+              </section>
+
+              {/* ROW 3: CLIENT IMPLEMENTATION | PARAMETERS (side by side) */}
+              <section>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+                  <div>
+                    <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.5rem' }}>CLIENT IMPLEMENTATION</h3>
                     <textarea 
                       key={`code-${localSelectedToolId}`}
-                      value={selectedTool.code} 
-                      onChange={(e) => updateToolDraft(localSelectedToolId!, { code: e.target.value })}
-                      style={{ width: '100%', padding: '1rem', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.8rem', fontFamily: 'monospace', minHeight: '250px', backgroundColor: '#1e293b', color: '#e2e8f0' }}
+                      value={selectedCustomTool ? selectedCustomTool.code : (selectedTool?.code || '')}
+                      onChange={(e) => {
+                        if (selectedCustomTool) updateCustomTool(selectedCustomTool.id, { code: e.target.value });
+                        else if (selectedTool) updateToolDraft(localSelectedToolId!, { code: e.target.value });
+                      }}
+                      style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '0.75rem', fontFamily: 'monospace', minHeight: '220px', resize: 'vertical' }}
                     />
                     <div style={{ fontSize: '0.65rem', color: '#64748b', marginTop: '0.5rem' }}>Available: args, helpers (now, sleep, log)</div>
-                  </section>
+                  </div>
+                  <div>
+                    <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.5rem' }}>PARAMETERS (JSON SCHEMA)</h3>
+                      {selectedCustomTool ? (
+                        <textarea 
+                          value={JSON.stringify(selectedCustomTool.parameters, null, 2)}
+                          onChange={(e) => {
+                            try {
+                              const params = JSON.parse(e.target.value);
+                              updateCustomTool(selectedCustomTool.id, { parameters: params });
+                            } catch (err) {}
+                          }}
+                          style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '0.75rem', fontFamily: 'monospace', minHeight: '220px', resize: 'vertical' }}
+                        />
+                    ) : (
+                      <textarea 
+                        key={`schema-${localSelectedToolId}`}
+                        value={selectedTool?.schemaText || ''}
+                        onChange={(e) => updateToolDraft(localSelectedToolId!, { schemaText: e.target.value })}
+                        style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '0.75rem', fontFamily: 'monospace', minHeight: '220px', resize: 'vertical' }}
+                      />
+                    )}
+                  </div>
+                </div>
+              </section>
 
-                  <section>
-                    <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.75rem' }}>2. INVOCATION SIMULATOR</h3>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <label style={{ fontSize: '0.65rem', fontWeight: 700, color: '#64748b' }}>ARGUMENTS (JSON)</label>
+              {/* ROW 4: INVOCATION SIMULATOR | EXECUTION PIPELINE (side by side) */}
+              <section>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+                  {/* INVOCATION SIMULATOR */}
+                  <div>
+                    <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.5rem' }}>INVOCATION SIMULATOR</h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <label style={{ fontSize: '0.65rem', fontWeight: 700, color: '#64748b' }}>ARGUMENTS (JSON)</label>
+                        {selectedCustomTool ? (
+                          <button onClick={() => updateCustomInvocationDraft(selectedCustomTool.id, { argsText: "{}" })} style={{ fontSize: '0.65rem', padding: '0.1rem 0.3rem', border: '1px solid #e2e8f0', background: '#fff', borderRadius: '4px', cursor: 'pointer' }}>Empty</button>
+                        ) : (
                           <div style={{ display: 'flex', gap: '0.5rem' }}>
                             <button onClick={() => loadExampleArgs(localSelectedToolId!)} style={{ fontSize: '0.65rem', padding: '0.1rem 0.3rem', border: '1px solid #e2e8f0', background: '#fff', borderRadius: '4px', cursor: 'pointer' }}>Example</button>
                             <button onClick={() => updateInvocationDraft(localSelectedToolId!, { argsText: "{}" })} style={{ fontSize: '0.65rem', padding: '0.1rem 0.3rem', border: '1px solid #e2e8f0', background: '#fff', borderRadius: '4px', cursor: 'pointer' }}>Empty</button>
                           </div>
-                        </div>
-                        <textarea 
-                          key={`args-${localSelectedToolId}`}
-                          value={selectedInvocation?.argsText} 
-                          onChange={(e) => { 
-                            updateInvocationDraft(localSelectedToolId!, { argsText: e.target.value }); 
-                            if (lastValidation[localSelectedToolId!]) {
-                              setLastValidation(prev => { const n = {...prev}; delete n[localSelectedToolId!]; return n; });
-                            }
-                          }}
-                          style={{ padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '0.8rem', fontFamily: 'monospace', minHeight: '100px' }}
-                        />
-                        {lastValidation[localSelectedToolId!] && (
-                          <div style={{ fontSize: '0.75rem', color: lastValidation[localSelectedToolId!].ok ? '#10b981' : '#ef4444' }}>
-                            {lastValidation[localSelectedToolId!].ok ? 'Valid' : `Errors: ${lastValidation[localSelectedToolId!].errors.join(', ')}`}
-                          </div>
                         )}
                       </div>
-                      <div style={{ display: 'flex', gap: '1rem' }}>
-                        <button onClick={() => handleValidate(localSelectedToolId!)} style={{ flex: 1, padding: '0.75rem', border: '1px solid #e2e8f0', backgroundColor: '#fff', color: '#1e293b', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}>VALIDATE</button>
-                        <button onClick={() => handleExecute(localSelectedToolId!)} style={{ flex: 2, padding: '0.75rem', backgroundColor: '#0f172a', color: '#fff', borderRadius: '8px', fontWeight: 700, cursor: 'pointer', border: 'none' }}>RUN ACTION</button>
-                      </div>
-                    </div>
-                  </section>
-
-                  <section>
-                    <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.75rem' }}>3. SCHEMA DEFINITION</h3>
-                    <textarea 
-                      key={`schema-${localSelectedToolId}`}
-                      value={selectedTool.schemaText} 
-                      onChange={(e) => updateToolDraft(localSelectedToolId!, { schemaText: e.target.value })}
-                      style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '0.75rem', fontFamily: 'monospace', minHeight: '100px' }}
-                    />
-                  </section>
-                </>
-              )}
-
-              {/* CUSTOM TOOL EDITOR */}
-              {selectedCustomTool && (
-                <>
-                  <section>
-                    <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#f59e0b', marginBottom: '0.75rem' }}>1. TOOL NAME</h3>
-                    <input 
-                      type="text"
-                      value={selectedCustomTool.name}
-                      onChange={(e) => updateCustomTool(selectedCustomTool.id, { name: e.target.value })}
-                      style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #fcd34d', fontSize: '0.8rem' }}
-                    />
-                  </section>
-
-                  <section>
-                    <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#f59e0b', marginBottom: '0.75rem' }}>2. DESCRIPTION</h3>
-                    <input 
-                      type="text"
-                      value={selectedCustomTool.description}
-                      onChange={(e) => updateCustomTool(selectedCustomTool.id, { description: e.target.value })}
-                      style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #fcd34d', fontSize: '0.8rem' }}
-                    />
-                  </section>
-
-                  <section>
-                    <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#f59e0b', marginBottom: '0.75rem' }}>3. CLIENT IMPLEMENTATION</h3>
-                    <textarea 
-                      value={selectedCustomTool.code}
-                      onChange={(e) => updateCustomTool(selectedCustomTool.id, { code: e.target.value })}
-                      style={{ width: '100%', padding: '1rem', borderRadius: '8px', border: '1px solid #fcd34d', fontSize: '0.8rem', fontFamily: 'monospace', minHeight: '250px', backgroundColor: '#1e293b', color: '#e2e8f0' }}
-                    />
-                    <div style={{ fontSize: '0.65rem', color: '#64748b', marginTop: '0.5rem' }}>Available: args, helpers (now, sleep, log)</div>
-                  </section>
-
-                  <section>
-                    <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#f59e0b', marginBottom: '0.75rem' }}>4. PARAMETERS (JSON SCHEMA)</h3>
-                    <textarea 
-                      value={JSON.stringify(selectedCustomTool.parameters, null, 2)}
-                      onChange={(e) => {
-                        try {
-                          const params = JSON.parse(e.target.value);
-                          updateCustomTool(selectedCustomTool.id, { parameters: params });
-                        } catch (err) {
-                          // Invalid JSON, don't update
-                        }
-                      }}
-                      style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #fcd34d', fontSize: '0.75rem', fontFamily: 'monospace', minHeight: '100px' }}
-                    />
-                  </section>
-
-                  <section>
-                    <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#f59e0b', marginBottom: '0.75rem' }}>5. INVOCATION SIMULATOR</h3>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <label style={{ fontSize: '0.65rem', fontWeight: 700, color: '#64748b' }}>ARGUMENTS (JSON)</label>
-                          <button 
-                            onClick={() => updateCustomInvocationDraft(selectedCustomTool.id, { argsText: "{}" })} 
-                            style={{ fontSize: '0.65rem', padding: '0.1rem 0.3rem', border: '1px solid #fcd34d', background: '#fff', borderRadius: '4px', cursor: 'pointer' }}
-                          >
-                            Empty
-                          </button>
-                        </div>
-                        <textarea 
-                          value={selectedCustomInvocation.argsText}
-                          onChange={(e) => updateCustomInvocationDraft(selectedCustomTool.id, { argsText: e.target.value })}
-                          style={{ padding: '0.5rem', borderRadius: '4px', border: '1px solid #fcd34d', fontSize: '0.8rem', fontFamily: 'monospace', minHeight: '100px' }}
-                        />
-                        {lastValidation[selectedCustomTool.id] && (
-                          <div style={{ fontSize: '0.75rem', color: lastValidation[selectedCustomTool.id].ok ? '#10b981' : '#ef4444' }}>
-                            {lastValidation[selectedCustomTool.id].ok ? 'Valid' : `Errors: ${lastValidation[selectedCustomTool.id].errors.join(', ')}`}
+                      {selectedCustomTool ? (
+                        <>
+                          <textarea 
+                            value={selectedCustomInvocation.argsText}
+                            onChange={(e) => updateCustomInvocationDraft(selectedCustomTool.id, { argsText: e.target.value })}
+                            style={{ padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '0.75rem', fontFamily: 'monospace', minHeight: '80px' }}
+                          />
+                          {lastValidation[selectedCustomTool.id] && (
+                            <div style={{ fontSize: '0.7rem', color: lastValidation[selectedCustomTool.id].ok ? '#10b981' : '#ef4444' }}>
+                              {lastValidation[selectedCustomTool.id].ok ? 'Valid' : `Errors: ${lastValidation[selectedCustomTool.id].errors.join(', ')}`}
+                            </div>
+                          )}
+                          <div style={{ display: 'flex', gap: '0.5rem' }}>
+                            <button onClick={handleCustomValidate} style={{ flex: 1, padding: '0.5rem', border: '1px solid #e2e8f0', backgroundColor: '#fff', color: '#1e293b', borderRadius: '4px', fontWeight: 700, cursor: 'pointer', fontSize: '0.7rem' }}>VALIDATE</button>
+                            <button onClick={handleCustomExecute} style={{ flex: 2, padding: '0.5rem', backgroundColor: '#0f172a', color: '#fff', borderRadius: '4px', fontWeight: 700, cursor: 'pointer', border: 'none', fontSize: '0.7rem' }}>RUN ACTION</button>
                           </div>
-                        )}
-                      </div>
-                      <div style={{ display: 'flex', gap: '1rem' }}>
-                        <button onClick={handleCustomValidate} style={{ flex: 1, padding: '0.75rem', border: '1px solid #fcd34d', backgroundColor: '#fff', color: '#92400e', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}>VALIDATE</button>
-                        <button onClick={handleCustomExecute} style={{ flex: 2, padding: '0.75rem', backgroundColor: '#92400e', color: '#fff', borderRadius: '8px', fontWeight: 700, cursor: 'pointer', border: 'none' }}>RUN ACTION</button>
-                      </div>
+                        </>
+                      ) : (
+                        <>
+                          <textarea 
+                            key={`args-${localSelectedToolId}`}
+                            value={selectedInvocation?.argsText || ''}
+                            onChange={(e) => {
+                              updateInvocationDraft(localSelectedToolId!, { argsText: e.target.value });
+                              if (lastValidation[localSelectedToolId!]) {
+                                setLastValidation(prev => { const n = {...prev}; delete n[localSelectedToolId!]; return n; });
+                              }
+                            }}
+                            style={{ padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '0.75rem', fontFamily: 'monospace', minHeight: '80px' }}
+                          />
+                          {lastValidation[localSelectedToolId!] && (
+                            <div style={{ fontSize: '0.7rem', color: lastValidation[localSelectedToolId!].ok ? '#10b981' : '#ef4444' }}>
+                              {lastValidation[localSelectedToolId!].ok ? 'Valid' : `Errors: ${lastValidation[localSelectedToolId!].errors.join(', ')}`}
+                            </div>
+                          )}
+                          <div style={{ display: 'flex', gap: '0.5rem' }}>
+                            <button onClick={() => handleValidate(localSelectedToolId!)} style={{ flex: 1, padding: '0.5rem', border: '1px solid #e2e8f0', backgroundColor: '#fff', color: '#1e293b', borderRadius: '4px', fontWeight: 700, cursor: 'pointer', fontSize: '0.7rem' }}>VALIDATE</button>
+                            <button onClick={() => handleExecute(localSelectedToolId!)} style={{ flex: 2, padding: '0.5rem', backgroundColor: '#0f172a', color: '#fff', borderRadius: '4px', fontWeight: 700, cursor: 'pointer', border: 'none', fontSize: '0.7rem' }}>RUN ACTION</button>
+                          </div>
+                        </>
+                      )}
                     </div>
-                  </section>
-                </>
-              )}
+                  </div>
 
-              {/* 3/5. PIPELINE & RESULT (common for both) */}
-              <section style={{ opacity: pipeline.active ? 1 : 0.5 }}>
-                <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.75rem' }}>
-                  {selectedCustomTool ? '6' : '3'}. EXECUTION PIPELINE
-                </h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', backgroundColor: '#f1f5f9', padding: '1rem', borderRadius: '8px' }}>
-                  {[
-                    { label: "RAW INPUT", value: pipeline.rawArgsText },
-                    { label: "VALIDATION", value: pipeline.validation.ok ? "PASS" : "FAIL", error: pipeline.validation.errors.join(', ') },
-                    { label: "RESULT", value: pipeline.result, error: pipeline.error, isJson: true }
-                  ].map((s, i) => (
-                    <div key={i} style={{ padding: '0.5rem', backgroundColor: '#fff', borderRadius: '4px', borderLeft: `3px solid ${s.error ? '#ef4444' : (s.value !== undefined ? '#10b981' : '#cbd5e1')}` }}>
-                      <div style={{ fontSize: '0.6rem', fontWeight: 800, color: '#94a3b8' }}>{s.label}</div>
-                      <div style={{ fontSize: '0.75rem' }}>
-                        {s.error ? <span style={{ color: '#ef4444' }}>{s.error}</span> : (s.isJson ? <pre style={{ margin: 0, fontSize: '0.7rem' }}>{JSON.stringify(s.value, null, 2)}</pre> : String(s.value ?? '—'))}
-                      </div>
+                  {/* EXECUTION PIPELINE */}
+                  <div style={{ opacity: pipeline.active ? 1 : 0.5 }}>
+                    <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.5rem' }}>EXECUTION PIPELINE</h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', backgroundColor: '#f1f5f9', padding: '0.75rem', borderRadius: '8px' }}>
+                      {[
+                        { label: "RAW INPUT", value: pipeline.rawArgsText },
+                        { label: "VALIDATION", value: pipeline.validation.ok ? "PASS" : "FAIL", error: pipeline.validation.errors.join(', ') },
+                        { label: "RESULT", value: pipeline.result, error: pipeline.error, isJson: true }
+                      ].map((s, i) => (
+                        <div key={i} style={{ padding: '0.4rem', backgroundColor: '#fff', borderRadius: '4px', borderLeft: `3px solid ${s.error ? '#ef4444' : (s.value !== undefined ? '#10b981' : '#cbd5e1')}` }}>
+                          <div style={{ fontSize: '0.55rem', fontWeight: 800, color: '#94a3b8' }}>{s.label}</div>
+                          <div style={{ fontSize: '0.65rem' }}>
+                            {s.error ? <span style={{ color: '#ef4444' }}>{s.error}</span> : (s.isJson ? <pre style={{ margin: 0, fontSize: '0.6rem' }}>{JSON.stringify(s.value, null, 2)}</pre> : String(s.value ?? '—'))}
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  </div>
                 </div>
               </section>
 
