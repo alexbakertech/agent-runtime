@@ -184,8 +184,8 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
   const defaultContextEngine = createDefaultContextEngineState();
   const contextEngineAppState = state?.pageAppStates?.chatAgent;
   const contextEngineUIState = state?.pageUIStates?.chatAgent;
-  const contextEngine: ContextEngineState = contextEngineAppState && contextEngineUIState
-    ? { ...contextEngineAppState, ...contextEngineUIState }
+  const contextEngine: ContextEngineState = (contextEngineAppState || contextEngineUIState)
+    ? { ...defaultContextEngine, ...contextEngineAppState, ...contextEngineUIState }
     : defaultContextEngine;
 
   const updateContextEngine = useCallback((updates: Partial<ContextEngineState>) => {
@@ -227,8 +227,8 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
   const defaultSandbox = createDefaultSandboxState();
   const sandboxAppState = state?.pageAppStates?.sandbox;
   const sandboxUIState = state?.pageUIStates?.sandbox;
-  const sandbox: SandboxState = sandboxAppState && sandboxUIState
-    ? { ...sandboxAppState, ...sandboxUIState }
+  const sandbox: SandboxState = (sandboxAppState || sandboxUIState)
+    ? { ...defaultSandbox, ...sandboxAppState, ...sandboxUIState }
     : defaultSandbox;
 
   const updateSandbox = useCallback((updates: Partial<SandboxState>) => {
