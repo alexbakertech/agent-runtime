@@ -7,7 +7,7 @@ import { loadState, saveState, exportCurrentState } from './storage';
 import { exportState, createExportOptions, generateExportFilename, downloadExport } from './export';
 import { previewImport, applyImport, validateImportJson } from './import';
 import type { ExportOptions, ImportPreview } from './types';
-import { setBrowserConsent as setBrowserConsentLocalStorage } from '@/lib/api/client';
+import { setBrowserConsent as setBrowserConsentLocalStorage, setRetryEnabled as setRetryEnabledLocalStorage, isRetryEnabled as isRetryEnabledLocalStorage } from '@/lib/api/client';
 
 interface StateContextValue {
   state: AppState;
@@ -29,6 +29,10 @@ interface StateContextValue {
   // Browser consent
   browserConsent: boolean;
   setBrowserConsent: (consent: boolean) => void;
+  
+  // Retry settings
+  retryEnabled: boolean;
+  setRetryEnabled: (enabled: boolean) => void;
   
   // Page state accessors
   contextEngine: ContextEngineState;
@@ -70,6 +74,10 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
     if (storedConsent !== loadedState.browserConsent) {
       loadedState.browserConsent = storedConsent;
     }
+    
+    // Sync retry enabled from localStorage
+    const storedRetry = isRetryEnabledLocalStorage();
+    loadedState.retryEnabled = storedRetry;
     
     setState(loadedState);
     setIsLoading(false);
@@ -177,6 +185,17 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
     setState(prev => {
       if (!prev) return prev;
       return { ...prev, browserConsent: consent };
+    });
+  }, []);
+
+  // Retry enabled
+  const retryEnabled = state?.retryEnabled || false;
+
+  const setRetryEnabled = useCallback((enabled: boolean) => {
+    setRetryEnabledLocalStorage(enabled);
+    setState(prev => {
+      if (!prev) return prev;
+      return { ...prev, retryEnabled: enabled };
     });
   }, []);
 
@@ -330,6 +349,8 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
     updateGlobalSettings,
     browserConsent,
     setBrowserConsent,
+    retryEnabled,
+    setRetryEnabled,
     contextEngine,
     updateContextEngine,
     sandbox,
@@ -381,4 +402,9 @@ export function useSandbox() {
 export function useBrowserConsent() {
   const { browserConsent, setBrowserConsent } = useAppState();
   return { browserConsent, setBrowserConsent };
+}
+
+export function useRetryEnabled() {
+  const { retryEnabled, setRetryEnabled } = useAppState();
+  return { retryEnabled, setRetryEnabled };
 }

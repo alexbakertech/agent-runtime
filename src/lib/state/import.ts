@@ -193,6 +193,7 @@ function generateMergedState(currentState: AppState, imported: Record<string, un
     profiles: [...currentState.profiles],
     activeProfileId: currentState.activeProfileId,
     browserConsent: currentState.browserConsent,
+    retryEnabled: currentState.retryEnabled,
     globalSettings: { ...currentState.globalSettings },
     pageAppStates: { ...currentState.pageAppStates },
     pageUIStates: { ...currentState.pageUIStates },

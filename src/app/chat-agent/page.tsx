@@ -277,13 +277,19 @@ export default function ContextEngine() {
         { id: assistantId, role: 'assistant', content: '', timestamp: new Date().toISOString() }
       ]);
 
-      await engineRef.current.run(
+      const result = await engineRef.current.run(
         activeProfileConfig,
         currentInput,
         transcriptForEngine,
         overridesForEngine,
         { prefix, prefixEnabled, historyEnabled, includeThinkingInContext: globalSettings.includeThinkingInContext }
       );
+
+      if (result.retryInfo) {
+        setTranscript(prev => prev.map(entry => 
+          entry.id === assistantId ? { ...entry, retryInfo: result.retryInfo } : entry
+        ));
+      }
 
       setChatStatus('idle');
     } catch (err: any) {
@@ -635,6 +641,16 @@ export default function ContextEngine() {
                       }}>
                         {msg.content || (chatStatus === 'loading' && i === transcript.length - 1 ? '...' : '')}
                       </div>
+                      {msg.retryInfo && (
+                        <div style={{ 
+                          fontSize: '0.7rem', 
+                          color: '#f59e0b', 
+                          marginTop: '0.5rem',
+                          fontStyle: 'italic'
+                        }}>
+                          Retried {msg.retryInfo.retries} time{msg.retryInfo.retries !== 1 ? 's' : ''} after failure
+                        </div>
+                      )}
                       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', marginLeft: '1rem' }}>
                         {isUser && msg.contextSnapshot && (
                           <button 

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { testConnection, fetchModels, chatStreamWithReasoning, isBrowserConsentGiven, BrowserConsentRequiredError } from '@/lib/api/client';
-import { useProfiles, useBrowserConsent } from '@/lib/state';
+import { useProfiles, useBrowserConsent, useRetryEnabled } from '@/lib/state';
 
 interface Config {
   name: string;
@@ -15,11 +15,13 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   reasoningContent?: string;
+  retryInfo?: { retries: number };
 }
 
 export default function Home() {
   const { profiles, activeProfile, addProfile, updateProfile, deleteProfile, setActiveProfile } = useProfiles();
   const { browserConsent, setBrowserConsent } = useBrowserConsent();
+  const { retryEnabled, setRetryEnabled } = useRetryEnabled();
 
   const [config, setConfig] = useState<Config>({
     name: 'Default',
@@ -198,8 +200,13 @@ export default function Home() {
     abortControllerRef.current = controller;
 
     try {
+      let capturedRetryInfo: { retries: number } | undefined;
       for await (const chunk of chatStreamWithReasoning(config, currentInput)) {
         if (controller.signal.aborted) break;
+        if (chunk.retryInfo) {
+          capturedRetryInfo = chunk.retryInfo;
+          continue;
+        }
         setMessages(prev => {
           const newMessages = [...prev];
           const lastIdx = newMessages.length - 1;
@@ -210,6 +217,9 @@ export default function Home() {
             }
             if (chunk.reasoning) {
               updated.reasoningContent = (updated.reasoningContent || '') + chunk.reasoning;
+            }
+            if (capturedRetryInfo) {
+              updated.retryInfo = capturedRetryInfo;
             }
             newMessages[lastIdx] = updated;
           }
@@ -356,6 +366,18 @@ export default function Home() {
               </label>
             </div>
 
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
+              <input
+                type="checkbox"
+                id="retry-enabled"
+                checked={retryEnabled ?? false}
+                onChange={(e) => setRetryEnabled(e.target.checked)}
+              />
+              <label htmlFor="retry-enabled" style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                Retry on failure (exponential backoff)
+              </label>
+            </div>
+
             <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
               <button onClick={handleTest} style={{ flex: 1, padding: '0.6rem', borderRadius: '6px', border: '1px solid #0070f3', backgroundColor: '#fff', color: '#0070f3', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}>Test</button>
               <button onClick={saveProfile} style={{ flex: 1, padding: '0.6rem', borderRadius: '6px', border: 'none', backgroundColor: '#0070f3', color: '#fff', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}>Save</button>
@@ -439,6 +461,16 @@ export default function Home() {
                       <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
                         {msg.content}
                       </div>
+                      {msg.retryInfo && (
+                        <div style={{ 
+                          fontSize: '0.7rem', 
+                          color: '#f59e0b', 
+                          marginTop: '0.5rem',
+                          fontStyle: 'italic'
+                        }}>
+                          Retried {msg.retryInfo.retries} time{msg.retryInfo.retries !== 1 ? 's' : ''} after failure
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}

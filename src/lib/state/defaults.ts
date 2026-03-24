@@ -115,6 +115,7 @@ export function createDefaultState(): AppState {
     profiles: [],
     activeProfileId: null,
     browserConsent: false,
+    retryEnabled: false,
     globalSettings: createDefaultGlobalSettings(),
     pageAppStates: createDefaultPageAppStates(),
     pageUIStates: createDefaultPageUIStates(),

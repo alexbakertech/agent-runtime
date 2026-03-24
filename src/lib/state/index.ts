@@ -74,4 +74,5 @@ export {
   useContextEngine,
   useSandbox,
   useBrowserConsent,
+  useRetryEnabled,
 } from './StateContext';

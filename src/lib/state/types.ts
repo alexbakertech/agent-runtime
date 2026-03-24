@@ -24,6 +24,9 @@ export interface AppState {
   /** Browser API consent flag */
   browserConsent: boolean;
   
+  /** Retry on failure flag */
+  retryEnabled: boolean;
+  
   /** Application-wide settings */
   globalSettings: GlobalSettings;
   
@@ -188,6 +191,9 @@ export interface TranscriptEntry {
   
   /** Thinking/reasoning content (if any) */
   reasoningContent?: string;
+  
+  /** Retry info if request was retried */
+  retryInfo?: { retries: number };
   
   /** Full prompt snapshot sent with this message */
   contextSnapshot?: string;
