@@ -159,6 +159,8 @@ function generateUUID(): string {
 
 export { generateUUID };
 
+export { createDefaultChatAgentAppState, createDefaultChatAgentUIState, createDefaultSandboxAppState, createDefaultSandboxUIState };
+
 export function createDefaultContextEngineState(): ContextEngineState {
   return {
     ...createDefaultChatAgentAppState(),

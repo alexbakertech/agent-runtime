@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 import type { AppState, Profile, GlobalSettings, ContextEngineState, SandboxState, ChatAgentAppState, ChatAgentUIState, SandboxAppState, SandboxUIState } from './types';
-import { createDefaultState, createDefaultProfile, createDefaultContextEngineState, createDefaultSandboxState } from './defaults';
+import { createDefaultState, createDefaultProfile, createDefaultContextEngineState, createDefaultSandboxState, createDefaultChatAgentAppState, createDefaultChatAgentUIState, createDefaultSandboxAppState, createDefaultSandboxUIState } from './defaults';
 import { loadState, saveState, exportCurrentState } from './storage';
 import { exportState, createExportOptions, generateExportFilename, downloadExport } from './export';
 import { previewImport, applyImport, validateImportJson } from './import';
@@ -182,6 +182,8 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
 
   // Context engine state - merge app and UI states
   const defaultContextEngine = createDefaultContextEngineState();
+  const defaultChatAgentApp = createDefaultChatAgentAppState();
+  const defaultChatAgentUI = createDefaultChatAgentUIState();
   const contextEngineAppState = state?.pageAppStates?.chatAgent;
   const contextEngineUIState = state?.pageUIStates?.chatAgent;
   const contextEngine: ContextEngineState = (contextEngineAppState || contextEngineUIState)
@@ -191,8 +193,8 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
   const updateContextEngine = useCallback((updates: Partial<ContextEngineState>) => {
     setState(prev => {
       if (!prev) return prev;
-      const appUpdates: ChatAgentAppState = { ...defaultContextEngine, ...prev.pageAppStates?.chatAgent };
-      const uiUpdates: ChatAgentUIState = { ...defaultContextEngine, ...prev.pageUIStates?.chatAgent };
+      const appUpdates: ChatAgentAppState = { ...defaultChatAgentApp, ...prev.pageAppStates?.chatAgent };
+      const uiUpdates: ChatAgentUIState = { ...defaultChatAgentUI, ...prev.pageUIStates?.chatAgent };
       
       if (updates.prefix !== undefined) appUpdates.prefix = updates.prefix;
       if (updates.prefixEnabled !== undefined) appUpdates.prefixEnabled = updates.prefixEnabled;
@@ -221,10 +223,12 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         },
       };
     });
-  }, [defaultContextEngine]);
+  }, [defaultChatAgentApp, defaultChatAgentUI, defaultContextEngine]);
 
   // Sandbox state - merge app and UI states
   const defaultSandbox = createDefaultSandboxState();
+  const defaultSandboxApp = createDefaultSandboxAppState();
+  const defaultSandboxUI = createDefaultSandboxUIState();
   const sandboxAppState = state?.pageAppStates?.sandbox;
   const sandboxUIState = state?.pageUIStates?.sandbox;
   const sandbox: SandboxState = (sandboxAppState || sandboxUIState)
@@ -234,8 +238,8 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
   const updateSandbox = useCallback((updates: Partial<SandboxState>) => {
     setState(prev => {
       if (!prev) return prev;
-      const appUpdates: SandboxAppState = { ...defaultSandbox, ...prev.pageAppStates?.sandbox };
-      const uiUpdates: SandboxUIState = { ...defaultSandbox, ...prev.pageUIStates?.sandbox };
+      const appUpdates: SandboxAppState = { ...defaultSandboxApp, ...prev.pageAppStates?.sandbox };
+      const uiUpdates: SandboxUIState = { ...defaultSandboxUI, ...prev.pageUIStates?.sandbox };
       
       if (updates.selectedToolId !== undefined) appUpdates.selectedToolId = updates.selectedToolId;
       if (updates.toolDrafts !== undefined) appUpdates.toolDrafts = updates.toolDrafts;
@@ -259,7 +263,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
         },
       };
     });
-  }, [defaultSandbox]);
+  }, [defaultSandboxApp, defaultSandboxUI, defaultSandbox]);
 
   // Reset
   const resetToDefaults = useCallback((keepProfiles: boolean = true) => {
