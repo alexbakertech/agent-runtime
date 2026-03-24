@@ -10,6 +10,13 @@ import type {
   ContextEngineState,
   SandboxState,
   ExecutionPipelineState,
+  PageAppStates,
+  PageUIStates,
+  ChatAgentAppState,
+  ChatAgentUIState,
+  SandboxAppState,
+  SandboxUIState,
+  RuntimeSpecUIState,
 } from './types';
 import { CURRENT_VERSION } from './types';
 
@@ -36,13 +43,18 @@ function createDefaultExecutionPipelineState(): ExecutionPipelineState {
   };
 }
 
-function createDefaultContextEngineState(): ContextEngineState {
+function createDefaultChatAgentAppState(): ChatAgentAppState {
   return {
     prefix: DEFAULT_SYSTEM_PROMPT,
     prefixEnabled: true,
     historyEnabled: true,
     transcript: [],
     overrides: {},
+  };
+}
+
+function createDefaultChatAgentUIState(): ChatAgentUIState {
+  return {
     showContextPreview: false,
     expandedStages: {},
     viewingSnapshotIndex: null,
@@ -54,16 +66,42 @@ function createDefaultContextEngineState(): ContextEngineState {
   };
 }
 
-function createDefaultSandboxState(): SandboxState {
+function createDefaultSandboxAppState(): SandboxAppState {
   return {
     selectedToolId: null,
     toolDrafts: {},
     invocationDrafts: {},
     pipeline: createDefaultExecutionPipelineState(),
+    customTools: [],
+  };
+}
+
+function createDefaultSandboxUIState(): SandboxUIState {
+  return {
     expandedTools: [],
     builtInToolsExpanded: true,
     userToolsExpanded: true,
-    customTools: [],
+  };
+}
+
+function createDefaultRuntimeSpecUIState(): RuntimeSpecUIState {
+  return {
+    showRawJson: false,
+  };
+}
+
+function createDefaultPageAppStates(): PageAppStates {
+  return {
+    chatAgent: createDefaultChatAgentAppState(),
+    sandbox: createDefaultSandboxAppState(),
+  };
+}
+
+function createDefaultPageUIStates(): PageUIStates {
+  return {
+    chatAgent: createDefaultChatAgentUIState(),
+    sandbox: createDefaultSandboxUIState(),
+    runtimeSpec: createDefaultRuntimeSpecUIState(),
   };
 }
 
@@ -78,10 +116,8 @@ export function createDefaultState(): AppState {
     activeProfileId: null,
     browserConsent: false,
     globalSettings: createDefaultGlobalSettings(),
-    pageStates: {
-      contextEngine: createDefaultContextEngineState(),
-      sandbox: createDefaultSandboxState(),
-    },
+    pageAppStates: createDefaultPageAppStates(),
+    pageUIStates: createDefaultPageUIStates(),
   };
 }
 
@@ -122,3 +158,17 @@ function generateUUID(): string {
 }
 
 export { generateUUID };
+
+export function createDefaultContextEngineState(): ContextEngineState {
+  return {
+    ...createDefaultChatAgentAppState(),
+    ...createDefaultChatAgentUIState(),
+  };
+}
+
+export function createDefaultSandboxState(): SandboxState {
+  return {
+    ...createDefaultSandboxAppState(),
+    ...createDefaultSandboxUIState(),
+  };
+}

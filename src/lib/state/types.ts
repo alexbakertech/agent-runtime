@@ -27,8 +27,11 @@ export interface AppState {
   /** Application-wide settings */
   globalSettings: GlobalSettings;
   
-  /** Page-specific state containers */
-  pageStates: PageStates;
+  /** Page-specific app state (business data) */
+  pageAppStates: PageAppStates;
+  
+  /** Page-specific UI state (presentation data) */
+  pageUIStates: PageUIStates;
 }
 
 /**
@@ -76,19 +79,54 @@ export interface GlobalSettings {
 }
 
 /**
- * Container for page-specific state.
- * Each page has its own optional state object.
+ * Container for page-specific app state (business data).
  */
-export interface PageStates {
-  /** Context Engine page state */
-  contextEngine?: ContextEngineState;
+export interface PageAppStates {
+  /** Chat Agent page app state */
+  chatAgent?: ChatAgentAppState;
   
-  /** Sandbox page state */
-  sandbox?: SandboxState;
-  
-  /** Runtime Spec page state (minimal, UI preferences only) */
-  runtimeSpec?: RuntimeSpecState;
+  /** Sandbox page app state */
+  sandbox?: SandboxAppState;
 }
+
+/**
+ * Container for page-specific UI state (presentation data).
+ */
+export interface PageUIStates {
+  /** Chat Agent page UI state */
+  chatAgent?: ChatAgentUIState;
+  
+  /** Sandbox page UI state */
+  sandbox?: SandboxUIState;
+  
+  /** Runtime Spec page UI state */
+  runtimeSpec?: RuntimeSpecUIState;
+}
+
+/**
+ * Chat Agent app state (business data) - subset of ContextEngineState.
+ */
+export type ChatAgentAppState = Pick<ContextEngineState, 'prefix' | 'prefixEnabled' | 'historyEnabled' | 'transcript' | 'overrides'>;
+
+/**
+ * Chat Agent UI state (presentation data) - subset of ContextEngineState.
+ */
+export type ChatAgentUIState = Pick<ContextEngineState, 'showContextPreview' | 'expandedStages' | 'viewingSnapshotIndex' | 'prefixCollapsed' | 'historyCollapsed' | 'expandedThinking' | 'showFullPrompt' | 'expandedContextThinking'>;
+
+/**
+ * Sandbox app state (business data) - subset of SandboxState.
+ */
+export type SandboxAppState = Pick<SandboxState, 'selectedToolId' | 'toolDrafts' | 'invocationDrafts' | 'pipeline' | 'customTools'>;
+
+/**
+ * Sandbox UI state (presentation data) - subset of SandboxState.
+ */
+export type SandboxUIState = Pick<SandboxState, 'expandedTools' | 'builtInToolsExpanded' | 'userToolsExpanded'>;
+
+/**
+ * Runtime Spec UI state.
+ */
+export type RuntimeSpecUIState = Pick<RuntimeSpecState, 'showRawJson'>;
 
 /**
  * Context Engine page state.
@@ -341,11 +379,14 @@ export interface ExportOptions {
   /** Include global settings */
   includeGlobalSettings: boolean;
   
-  /** Include context engine state */
-  includeContextEngine: boolean;
+  /** Include Chat Agent app state */
+  includeChatAgent: boolean;
   
   /** Include sandbox tool definitions */
   includeSandboxTools: boolean;
+  
+  /** Include UI states (panel collapses, expanded sections, etc.) */
+  includeUIStates: boolean;
 }
 
 /**
@@ -371,11 +412,14 @@ export interface ImportPreview {
   /** Whether global settings will change */
   globalSettingsChanged: boolean;
   
-  /** Whether context engine state will change */
-  contextEngineChanged: boolean;
+  /** Whether Chat Agent state will change */
+  chatAgentChanged: boolean;
   
   /** Whether sandbox state will change */
   sandboxChanged: boolean;
+  
+  /** Whether UI states will change */
+  uiStatesChanged: boolean;
   
   /** The merged state preview */
   mergedState: AppState;

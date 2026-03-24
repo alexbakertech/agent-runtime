@@ -46,7 +46,8 @@ The root object containing all application state.
 | `activeProfileId` | `string \| null` | ID of the currently selected profile |
 | `browserConsent` | `boolean` | Whether user has consented to browser API usage |
 | `globalSettings` | `GlobalSettings` | Application-wide settings |
-| `pageStates` | `PageStates` | Page-specific state containers |
+| `pageAppStates` | `PageAppStates` | Page-specific app state (business data) |
+| `pageUIStates` | `PageUIStates` | Page-specific UI state (presentation data) |
 
 ### Profile
 
@@ -73,19 +74,28 @@ Application-wide settings that apply across all pages.
 | `includeThinkingInContext` | `boolean` | `true` | Include reasoning/thinking in context |
 | `stepMode` | `boolean` | `false` | Enable step-by-step execution mode |
 
-### PageStates
+### PageAppStates
 
-Container for page-specific state objects.
+Container for page-specific app state (business data that should travel with profiles).
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `contextEngine` | `ContextEngineState` | State for the Chat Agent page |
-| `sandbox` | `SandboxState` | State for the Tools Sandbox page |
-| `runtimeSpec` | `RuntimeSpecState` | State for the Runtime Spec page |
+| `chatAgent` | `ChatAgentAppState` | App state for the Chat Agent page |
+| `sandbox` | `SandboxAppState` | App state for the Tools Sandbox page |
 
-### ContextEngineState
+### PageUIStates
 
-Manages chat transcript, message overrides, and UI state for the Chat Agent.
+Container for page-specific UI state (presentation data, machine/browser specific).
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `chatAgent` | `ChatAgentUIState` | UI state for the Chat Agent page |
+| `sandbox` | `SandboxUIState` | UI state for the Tools Sandbox page |
+| `runtimeSpec` | `RuntimeSpecUIState` | UI state for the Runtime Spec page |
+
+### ChatAgentAppState
+
+App state (business data) for the Chat Agent page.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -94,6 +104,13 @@ Manages chat transcript, message overrides, and UI state for the Chat Agent.
 | `historyEnabled` | `boolean` | Include chat history in context |
 | `transcript` | `TranscriptEntry[]` | Chat message history |
 | `overrides` | `Record<string, Override>` | Message modifications keyed by entry ID |
+
+### ChatAgentUIState
+
+UI state (presentation data) for the Chat Agent page.
+
+| Field | Type | Description |
+|-------|------|-------------|
 | `showContextPreview` | `boolean` | Show full context preview panel |
 | `expandedStages` | `Record<string, boolean>` | Which execution stages are expanded |
 | `viewingSnapshotIndex` | `string \| null` | ID of entry being inspected |
@@ -129,20 +146,27 @@ Configuration for modifying or excluding a transcript entry.
 | `excluded` | `boolean` | Exclude this message from context |
 | `reasoningExcluded` | `boolean` | Exclude reasoning from context |
 
-### SandboxState
+### SandboxAppState
 
-Manages tool definitions and execution state for the Sandbox.
+App state (business data) for the Sandbox page.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `selectedToolId` | `string \| null` | `null` | Currently selected tool |
-| `toolDrafts` | `Record<string, ToolDraft>` | `{}` | Tool definitions keyed by ID |
-| `invocationDrafts` | `Record<string, ToolInvocationDraft>` | `{}` | Invocation drafts |
-| `pipeline` | `ExecutionPipelineState` | - | Current execution state |
-| `expandedTools` | `string[]` | `[]` | IDs of expanded tool sections |
-| `builtInToolsExpanded` | `boolean` | `true` | Whether built-in tools section is expanded |
-| `userToolsExpanded` | `boolean` | `true` | Whether user tools section is expanded |
-| `customTools` | `CustomTool[]` | `[]` | User-defined custom tools |
+| Field | Type | Description |
+|-------|------|-------------|
+| `selectedToolId` | `string \| null` | Currently selected tool |
+| `toolDrafts` | `Record<string, ToolDraft>` | Tool definitions keyed by ID |
+| `invocationDrafts` | `Record<string, ToolInvocationDraft>` | Invocation drafts |
+| `pipeline` | `ExecutionPipelineState` | Current execution state |
+| `customTools` | `CustomTool[]` | User-defined custom tools |
+
+### SandboxUIState
+
+UI state (presentation data) for the Sandbox page.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `expandedTools` | `string[]` | IDs of expanded tool sections |
+| `builtInToolsExpanded` | `boolean` | Whether built-in tools section is expanded |
+| `userToolsExpanded` | `boolean` | Whether user tools section is expanded |
 
 ### CustomTool
 
@@ -207,9 +231,9 @@ Result of validating tool arguments against schema.
 | `error` | `string?` | Error message if invalid |
 | `warnings` | `string[]?` | Non-blocking warnings |
 
-### RuntimeSpecState
+### RuntimeSpecUIState
 
-Minimal state for the Runtime Spec page.
+UI state for the Runtime Spec page.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -225,8 +249,9 @@ When exporting, you can configure which sections to include:
 |--------|-------------|
 | `includeProfiles` | Include profile configurations (API keys always excluded) |
 | `includeGlobalSettings` | Include global settings |
-| `includeContextEngine` | Include context engine state |
+| `includeChatAgent` | Include Chat Agent app state |
 | `includeSandboxTools` | Include sandbox tool definitions |
+| `includeUIStates` | Include UI state (panel collapses, expanded sections, etc.) |
 
 ### Import Behavior
 
@@ -301,13 +326,24 @@ When no state exists in localStorage, the following defaults are created:
     includeThinkingInContext: true,
     stepMode: false
   },
-  pageStates: {
-    contextEngine: {
+  pageAppStates: {
+    chatAgent: {
       prefix: "You are a helpful AI assistant. Answer concisely.",
       prefixEnabled: true,
       historyEnabled: true,
       transcript: [],
-      overrides: {},
+      overrides: {}
+    },
+    sandbox: {
+      selectedToolId: null,
+      toolDrafts: {},
+      invocationDrafts: {},
+      pipeline: { /* empty state */ },
+      customTools: []
+    }
+  },
+  pageUIStates: {
+    chatAgent: {
       showContextPreview: false,
       expandedStages: {},
       viewingSnapshotIndex: null,
@@ -318,14 +354,12 @@ When no state exists in localStorage, the following defaults are created:
       expandedContextThinking: {}
     },
     sandbox: {
-      selectedToolId: null,
-      toolDrafts: {},
-      invocationDrafts: {},
-      pipeline: { /* empty state */ },
       expandedTools: [],
       builtInToolsExpanded: true,
-      userToolsExpanded: true,
-      customTools: []
+      userToolsExpanded: true
+    },
+    runtimeSpec: {
+      showRawJson: false
     }
   }
 }

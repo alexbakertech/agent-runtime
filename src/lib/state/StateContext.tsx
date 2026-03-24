@@ -1,8 +1,8 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
-import type { AppState, Profile, GlobalSettings, ContextEngineState, SandboxState } from './types';
-import { createDefaultState, createDefaultProfile } from './defaults';
+import type { AppState, Profile, GlobalSettings, ContextEngineState, SandboxState, ChatAgentAppState, ChatAgentUIState, SandboxAppState, SandboxUIState } from './types';
+import { createDefaultState, createDefaultProfile, createDefaultContextEngineState, createDefaultSandboxState } from './defaults';
 import { loadState, saveState, exportCurrentState } from './storage';
 import { exportState, createExportOptions, generateExportFilename, downloadExport } from './export';
 import { previewImport, applyImport, validateImportJson } from './import';
@@ -180,68 +180,86 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  // Context engine state
-  const contextEngine = state?.pageStates?.contextEngine || {
-    prefix: "You are a helpful AI assistant. Answer concisely.",
-    prefixEnabled: true,
-    historyEnabled: true,
-    transcript: [],
-    overrides: {},
-    showContextPreview: false,
-    expandedStages: {},
-    viewingSnapshotIndex: null,
-    prefixCollapsed: false,
-    historyCollapsed: false,
-    expandedThinking: {},
-    showFullPrompt: false,
-    expandedContextThinking: {},
-  };
+  // Context engine state - merge app and UI states
+  const defaultContextEngine = createDefaultContextEngineState();
+  const contextEngineAppState = state?.pageAppStates?.chatAgent;
+  const contextEngineUIState = state?.pageUIStates?.chatAgent;
+  const contextEngine: ContextEngineState = contextEngineAppState && contextEngineUIState
+    ? { ...contextEngineAppState, ...contextEngineUIState }
+    : defaultContextEngine;
 
   const updateContextEngine = useCallback((updates: Partial<ContextEngineState>) => {
     setState(prev => {
       if (!prev) return prev;
+      const appUpdates: ChatAgentAppState = { ...defaultContextEngine, ...prev.pageAppStates?.chatAgent };
+      const uiUpdates: ChatAgentUIState = { ...defaultContextEngine, ...prev.pageUIStates?.chatAgent };
+      
+      if (updates.prefix !== undefined) appUpdates.prefix = updates.prefix;
+      if (updates.prefixEnabled !== undefined) appUpdates.prefixEnabled = updates.prefixEnabled;
+      if (updates.historyEnabled !== undefined) appUpdates.historyEnabled = updates.historyEnabled;
+      if (updates.transcript !== undefined) appUpdates.transcript = updates.transcript;
+      if (updates.overrides !== undefined) appUpdates.overrides = updates.overrides;
+      
+      if (updates.showContextPreview !== undefined) uiUpdates.showContextPreview = updates.showContextPreview;
+      if (updates.expandedStages !== undefined) uiUpdates.expandedStages = updates.expandedStages;
+      if (updates.viewingSnapshotIndex !== undefined) uiUpdates.viewingSnapshotIndex = updates.viewingSnapshotIndex;
+      if (updates.prefixCollapsed !== undefined) uiUpdates.prefixCollapsed = updates.prefixCollapsed;
+      if (updates.historyCollapsed !== undefined) uiUpdates.historyCollapsed = updates.historyCollapsed;
+      if (updates.expandedThinking !== undefined) uiUpdates.expandedThinking = updates.expandedThinking;
+      if (updates.showFullPrompt !== undefined) uiUpdates.showFullPrompt = updates.showFullPrompt;
+      if (updates.expandedContextThinking !== undefined) uiUpdates.expandedContextThinking = updates.expandedContextThinking;
+      
       return {
         ...prev,
-        pageStates: {
-          ...prev.pageStates,
-          contextEngine: { ...(prev.pageStates?.contextEngine || contextEngine), ...updates },
+        pageAppStates: {
+          ...prev.pageAppStates,
+          chatAgent: appUpdates,
+        },
+        pageUIStates: {
+          ...prev.pageUIStates,
+          chatAgent: uiUpdates,
         },
       };
     });
-  }, [contextEngine]);
+  }, [defaultContextEngine]);
 
-  // Sandbox state
-  const sandbox = state?.pageStates?.sandbox || {
-    selectedToolId: null,
-    toolDrafts: {},
-    invocationDrafts: {},
-    pipeline: {
-      rawArgsText: "",
-      parsedArgs: null,
-      parseError: null,
-      validation: null,
-      result: null,
-      error: null,
-      active: false,
-    },
-    expandedTools: [],
-    builtInToolsExpanded: true,
-    userToolsExpanded: true,
-    customTools: [],
-  };
+  // Sandbox state - merge app and UI states
+  const defaultSandbox = createDefaultSandboxState();
+  const sandboxAppState = state?.pageAppStates?.sandbox;
+  const sandboxUIState = state?.pageUIStates?.sandbox;
+  const sandbox: SandboxState = sandboxAppState && sandboxUIState
+    ? { ...sandboxAppState, ...sandboxUIState }
+    : defaultSandbox;
 
   const updateSandbox = useCallback((updates: Partial<SandboxState>) => {
     setState(prev => {
       if (!prev) return prev;
+      const appUpdates: SandboxAppState = { ...defaultSandbox, ...prev.pageAppStates?.sandbox };
+      const uiUpdates: SandboxUIState = { ...defaultSandbox, ...prev.pageUIStates?.sandbox };
+      
+      if (updates.selectedToolId !== undefined) appUpdates.selectedToolId = updates.selectedToolId;
+      if (updates.toolDrafts !== undefined) appUpdates.toolDrafts = updates.toolDrafts;
+      if (updates.invocationDrafts !== undefined) appUpdates.invocationDrafts = updates.invocationDrafts;
+      if (updates.pipeline !== undefined) appUpdates.pipeline = updates.pipeline;
+      if (updates.customTools !== undefined) appUpdates.customTools = updates.customTools;
+      
+      if (updates.expandedTools !== undefined) uiUpdates.expandedTools = updates.expandedTools;
+      if (updates.builtInToolsExpanded !== undefined) uiUpdates.builtInToolsExpanded = updates.builtInToolsExpanded;
+      if (updates.userToolsExpanded !== undefined) uiUpdates.userToolsExpanded = updates.userToolsExpanded;
+      
       return {
         ...prev,
-        pageStates: {
-          ...prev.pageStates,
-          sandbox: { ...(prev.pageStates?.sandbox || sandbox), ...updates },
+        pageAppStates: {
+          ...prev.pageAppStates,
+          sandbox: appUpdates,
+        },
+        pageUIStates: {
+          ...prev.pageUIStates,
+          sandbox: uiUpdates,
         },
       };
     });
-  }, [sandbox]);
+  }, [defaultSandbox]);
 
   // Reset
   const resetToDefaults = useCallback((keepProfiles: boolean = true) => {

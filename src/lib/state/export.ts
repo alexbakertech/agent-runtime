@@ -9,8 +9,9 @@ import type { AppState, ExportOptions } from './types';
 const DEFAULT_EXPORT_OPTIONS: ExportOptions = {
   includeProfiles: true,
   includeGlobalSettings: true,
-  includeContextEngine: true,
+  includeChatAgent: true,
   includeSandboxTools: true,
+  includeUIStates: false,
 };
 
 /**
@@ -47,22 +48,28 @@ export function exportState(
     exportData.globalSettings = { ...state.globalSettings };
   }
 
-  if (options.includeContextEngine && state.pageStates.contextEngine) {
-    exportData.pageStates = {
-      ...(exportData.pageStates || {}),
-      contextEngine: { ...state.pageStates.contextEngine },
+  if (options.includeChatAgent && state.pageAppStates.chatAgent) {
+    exportData.pageAppStates = {
+      ...(exportData.pageAppStates || {}),
+      chatAgent: { ...state.pageAppStates.chatAgent },
     };
   }
 
-  if (options.includeSandboxTools && state.pageStates.sandbox) {
-    exportData.pageStates = {
-      ...(exportData.pageStates || {}),
+  if (options.includeSandboxTools && state.pageAppStates.sandbox) {
+    exportData.pageAppStates = {
+      ...(exportData.pageAppStates || {}),
       sandbox: {
-        ...state.pageStates.sandbox,
+        ...state.pageAppStates.sandbox,
         // Don't include pipeline execution state
-        pipeline: state.pageStates.sandbox.pipeline,
-        invocationDrafts: { ...state.pageStates.sandbox.invocationDrafts },
+        pipeline: state.pageAppStates.sandbox.pipeline,
+        invocationDrafts: { ...state.pageAppStates.sandbox.invocationDrafts },
       },
+    };
+  }
+
+  if (options.includeUIStates) {
+    exportData.pageUIStates = {
+      ...state.pageUIStates,
     };
   }
 
@@ -112,15 +119,19 @@ export function getExportSummary(
     parts.push('global settings');
   }
 
-  if (options.includeContextEngine && state.pageStates.contextEngine) {
-    const ce = state.pageStates.contextEngine;
-    parts.push(`context engine (${ce.transcript.length} messages)`);
+  if (options.includeChatAgent && state.pageAppStates.chatAgent) {
+    const ce = state.pageAppStates.chatAgent;
+    parts.push(`Chat Agent (${ce.transcript.length} messages)`);
   }
 
-  if (options.includeSandboxTools && state.pageStates.sandbox) {
-    const sandbox = state.pageStates.sandbox;
+  if (options.includeSandboxTools && state.pageAppStates.sandbox) {
+    const sandbox = state.pageAppStates.sandbox;
     const toolCount = Object.keys(sandbox.toolDrafts).length;
     parts.push(`sandbox (${toolCount} tool(s))`);
+  }
+
+  if (options.includeUIStates) {
+    parts.push('UI state');
   }
 
   if (parts.length === 0) {

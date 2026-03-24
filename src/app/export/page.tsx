@@ -113,12 +113,16 @@ export default function ExportPage() {
               <span style={{ fontSize: '0.85rem' }}>Include global settings</span>
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-              <input type="checkbox" checked={exportOptions.includeContextEngine} onChange={(e) => setExportOptions(prev => ({ ...prev, includeContextEngine: e.target.checked }))} />
+              <input type="checkbox" checked={exportOptions.includeChatAgent} onChange={(e) => setExportOptions(prev => ({ ...prev, includeChatAgent: e.target.checked }))} />
               <span style={{ fontSize: '0.85rem' }}>Include Chat Agent state</span>
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
               <input type="checkbox" checked={exportOptions.includeSandboxTools} onChange={(e) => setExportOptions(prev => ({ ...prev, includeSandboxTools: e.target.checked }))} />
               <span style={{ fontSize: '0.85rem' }}>Include sandbox tool definitions</span>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+              <input type="checkbox" checked={exportOptions.includeUIStates} onChange={(e) => setExportOptions(prev => ({ ...prev, includeUIStates: e.target.checked }))} />
+              <span style={{ fontSize: '0.85rem' }}>Include UI state (panel collapses, expanded sections, etc.)</span>
             </label>
           </div>
           <p style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '1rem', marginBottom: '1rem' }}>{exportPreview}</p>
@@ -138,8 +142,9 @@ export default function ExportPage() {
               {importPreview.newProfiles.length > 0 && <p>New profiles: {importPreview.newProfiles.map(p => p.name).join(', ')}</p>}
               {importPreview.updatedProfiles.length > 0 && <p>Updated profiles: {importPreview.updatedProfiles.map(p => p.name).join(', ')}</p>}
               {importPreview.globalSettingsChanged && <p>Global settings will be updated</p>}
-              {importPreview.contextEngineChanged && <p>Context engine state will be updated</p>}
+              {importPreview.chatAgentChanged && <p>Chat Agent state will be updated</p>}
               {importPreview.sandboxChanged && <p>Sandbox state will be updated</p>}
+              {importPreview.uiStatesChanged && <p>UI state will be updated</p>}
             </div>
           )}
           <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>

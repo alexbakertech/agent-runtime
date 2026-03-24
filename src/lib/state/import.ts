@@ -104,24 +104,22 @@ export function previewImport(
       }
     }
 
-    // Check context engine state
-    let contextEngineChanged = false;
-    if (parsed.pageStates?.contextEngine) {
-      if (typeof parsed.pageStates.contextEngine !== 'object') {
-        errors.push('Context engine state must be an object');
-      } else {
-        contextEngineChanged = true;
-      }
+    // Check Chat Agent state
+    let chatAgentChanged = false;
+    if (parsed.pageAppStates?.chatAgent || parsed.pageStates?.contextEngine) {
+      chatAgentChanged = true;
     }
 
     // Check sandbox state
     let sandboxChanged = false;
-    if (parsed.pageStates?.sandbox) {
-      if (typeof parsed.pageStates.sandbox !== 'object') {
-        errors.push('Sandbox state must be an object');
-      } else {
-        sandboxChanged = true;
-      }
+    if (parsed.pageAppStates?.sandbox || parsed.pageStates?.sandbox) {
+      sandboxChanged = true;
+    }
+
+    // Check UI states
+    let uiStatesChanged = false;
+    if (parsed.pageUIStates) {
+      uiStatesChanged = true;
     }
 
     if (errors.length > 0) {
@@ -143,8 +141,9 @@ export function previewImport(
         updatedProfiles,
         removedProfileIds: [], // We don't remove profiles on import
         globalSettingsChanged,
-        contextEngineChanged,
+        chatAgentChanged,
         sandboxChanged,
+        uiStatesChanged,
         mergedState,
       },
     };
@@ -195,7 +194,8 @@ function generateMergedState(currentState: AppState, imported: Record<string, un
     activeProfileId: currentState.activeProfileId,
     browserConsent: currentState.browserConsent,
     globalSettings: { ...currentState.globalSettings },
-    pageStates: { ...currentState.pageStates },
+    pageAppStates: { ...currentState.pageAppStates },
+    pageUIStates: { ...currentState.pageUIStates },
   };
 
   // Merge profiles
@@ -233,23 +233,35 @@ function generateMergedState(currentState: AppState, imported: Record<string, un
     } as AppState['globalSettings'];
   }
 
-  // Merge context engine state
-  if (imported.pageStates && typeof imported.pageStates === 'object') {
-    const importedPageStates = imported.pageStates as Record<string, unknown>;
-    if (importedPageStates.contextEngine && typeof importedPageStates.contextEngine === 'object') {
-      merged.pageStates.contextEngine = {
-        ...merged.pageStates.contextEngine!,
-        ...(importedPageStates.contextEngine as Record<string, unknown>),
-      } as AppState['pageStates']['contextEngine'];
-    }
+  // Handle old pageStates format (backward compatibility)
+  const oldPageStates = imported.pageStates as Record<string, unknown> | undefined;
+  
+  // Merge Chat Agent app state (from new format or old contextEngine)
+  const importedChatAgent = (imported.pageAppStates as Record<string, unknown> | undefined)?.chatAgent 
+    || oldPageStates?.contextEngine;
+  if (importedChatAgent && typeof importedChatAgent === 'object') {
+    merged.pageAppStates.chatAgent = {
+      ...merged.pageAppStates.chatAgent!,
+      ...(importedChatAgent as Record<string, unknown>),
+    } as NonNullable<AppState['pageAppStates']['chatAgent']>;
+  }
 
-    // Merge sandbox state
-    if (importedPageStates.sandbox && typeof importedPageStates.sandbox === 'object') {
-      merged.pageStates.sandbox = {
-        ...merged.pageStates.sandbox!,
-        ...(importedPageStates.sandbox as Record<string, unknown>),
-      } as AppState['pageStates']['sandbox'];
-    }
+  // Merge sandbox app state
+  const importedSandbox = (imported.pageAppStates as Record<string, unknown> | undefined)?.sandbox 
+    || oldPageStates?.sandbox;
+  if (importedSandbox && typeof importedSandbox === 'object') {
+    merged.pageAppStates.sandbox = {
+      ...merged.pageAppStates.sandbox!,
+      ...(importedSandbox as Record<string, unknown>),
+    } as NonNullable<AppState['pageAppStates']['sandbox']>;
+  }
+
+  // Merge UI states
+  if (imported.pageUIStates && typeof imported.pageUIStates === 'object') {
+    merged.pageUIStates = {
+      ...merged.pageUIStates,
+      ...(imported.pageUIStates as Record<string, unknown>),
+    } as AppState['pageUIStates'];
   }
 
   return merged;
