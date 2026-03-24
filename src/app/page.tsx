@@ -4,8 +4,8 @@ import Link from 'next/link';
 
 const pages = [
   {
-    href: '/context-engine',
-    title: 'Context Engine',
+    href: '/chat-agent',
+    title: 'Chat Agent',
     description: 'Chat with AI agents. Control context, overrides, and execution flow.',
     icon: '💬',
     color: '#3b82f6',
@@ -42,7 +42,7 @@ export default function Home() {
           <ol style={{ margin: 0, paddingLeft: '1rem', fontSize: '0.8rem', color: '#475569', lineHeight: 1.8 }}>
             <li>Add an API profile in Configure</li>
             <li>Build custom tools in Tools Sandbox</li>
-            <li>Start chatting in Context Engine</li>
+            <li>Start chatting in Chat Agent</li>
           </ol>
         </div>
         <div style={{ backgroundColor: '#fff', padding: '1.25rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>

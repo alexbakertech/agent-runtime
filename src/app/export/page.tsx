@@ -114,7 +114,7 @@ export default function ExportPage() {
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
               <input type="checkbox" checked={exportOptions.includeContextEngine} onChange={(e) => setExportOptions(prev => ({ ...prev, includeContextEngine: e.target.checked }))} />
-              <span style={{ fontSize: '0.85rem' }}>Include context engine state</span>
+              <span style={{ fontSize: '0.85rem' }}>Include Chat Agent state</span>
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
               <input type="checkbox" checked={exportOptions.includeSandboxTools} onChange={(e) => setExportOptions(prev => ({ ...prev, includeSandboxTools: e.target.checked }))} />

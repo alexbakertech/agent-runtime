@@ -79,13 +79,13 @@ Container for page-specific state objects.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `contextEngine` | `ContextEngineState` | State for the Context Engine page |
+| `contextEngine` | `ContextEngineState` | State for the Chat Agent page |
 | `sandbox` | `SandboxState` | State for the Tools Sandbox page |
 | `runtimeSpec` | `RuntimeSpecState` | State for the Runtime Spec page |
 
 ### ContextEngineState
 
-Manages chat transcript, message overrides, and UI state for the Context Engine.
+Manages chat transcript, message overrides, and UI state for the Chat Agent.
 
 | Field | Type | Description |
 |-------|------|-------------|
