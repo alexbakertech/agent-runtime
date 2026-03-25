@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { useRuntimeSpec, useProfiles } from '@/lib/state';
+import { useRuntimeSpec, useProfiles, useSandbox } from '@/lib/state';
 import {
   RuntimeSpec,
   RuntimeStep,
@@ -14,9 +14,20 @@ import {
   createDefaultLoopStep,
 } from '@/lib/runtime/spec/types';
 
+const BUILT_IN_TOOLS = [
+  { name: 'get_time', description: 'Returns the current system time' },
+  { name: 'list_files', description: 'Lists files in the sandbox directory' },
+  { name: 'read_file', description: 'Reads file content from sandbox' },
+  { name: 'search_text', description: 'Searches for text in sandbox files' },
+];
+
 export default function RuntimeBuilder() {
   const { runtimeSpec, updateRuntimeSpec } = useRuntimeSpec();
-  const { activeProfile } = useProfiles();
+  const { profiles, activeProfile, setActiveProfile } = useProfiles();
+  const { sandbox } = useSandbox();
+  
+  const [userQuery, setUserQuery] = useState('');
+  const [selectedProfileId, setSelectedProfileId] = useState<string>('');
   
   const { runtimeSpecs, activeRuntimeSpecId, isLocked } = runtimeSpec;
   
@@ -117,9 +128,17 @@ export default function RuntimeBuilder() {
     handleUpdateSpec({ steps });
   };
   
+  const handleProfileChange = (profileId: string) => {
+    setSelectedProfileId(profileId);
+    setActiveProfile(profileId);
+  };
+
   const handleToggleLock = () => {
     updateRuntimeSpec({ isLocked: !isLocked });
   };
+
+  const customTools = sandbox?.customTools || [];
+  const allTools = [...BUILT_IN_TOOLS, ...customTools.map((t: { name: string; description?: string }) => ({ name: t.name, description: t.description || '' }))];
   
   const handleToggleStepEnabled = (stepId: string, enabled: boolean) => {
     handleUpdateStep(stepId, { enabled });
@@ -223,9 +242,10 @@ export default function RuntimeBuilder() {
               disabled={isStepLocked}
             />
           )}
-          {step.type === 'tool' && (
+          {step.type === 'tool' && activeSpec && (
             <ToolStepEditor
               step={step}
+              steps={activeSpec.steps}
               onChange={(updates) => handleUpdateStep(step.id, updates)}
               disabled={isStepLocked}
             />
@@ -313,6 +333,59 @@ export default function RuntimeBuilder() {
       </aside>
       
       <main style={{ flex: 1, padding: '1.5rem', overflowY: 'auto' }}>
+        <div style={{ marginBottom: '1.5rem', padding: '1rem', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+          <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
+                Profile
+              </label>
+              <select
+                value={selectedProfileId || activeProfile?.id || ''}
+                onChange={(e) => handleProfileChange(e.target.value)}
+                disabled={isLocked}
+                style={{
+                  width: '100%',
+                  padding: '0.5rem',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '4px',
+                  fontSize: '0.85rem',
+                  backgroundColor: '#fff',
+                }}
+              >
+                <option value="">Select a profile...</option>
+                {Object.values(profiles).map((profile) => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          
+          <div>
+            <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
+              User Query
+            </label>
+            <textarea
+              value={userQuery}
+              onChange={(e) => setUserQuery(e.target.value)}
+              disabled={isLocked}
+              rows={2}
+              placeholder="Enter your query or instructions..."
+              style={{
+                width: '100%',
+                padding: '0.5rem',
+                border: '1px solid #e2e8f0',
+                borderRadius: '4px',
+                fontSize: '0.85rem',
+                fontFamily: 'inherit',
+                resize: 'vertical',
+                backgroundColor: '#fff',
+              }}
+            />
+          </div>
+        </div>
+
         {activeSpec ? (
           <>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem' }}>
@@ -537,19 +610,21 @@ function PromptStepEditor({ step, onChange, disabled }: { step: PromptStep; onCh
   );
 }
 
-function ToolStepEditor({ step, onChange, disabled }: { step: ToolStep; onChange: (updates: Partial<ToolStep>) => void; disabled: boolean }) {
+function ToolStepEditor({ step, steps, onChange, disabled }: { step: ToolStep; steps: RuntimeStep[]; onChange: (updates: Partial<ToolStep>) => void; disabled: boolean }) {
+  const customTools = [] as { name: string; description?: string }[];
+  const allTools = [...BUILT_IN_TOOLS, ...customTools];
+  const isCustomTool = step.toolName && !BUILT_IN_TOOLS.find(t => t.name === step.toolName);
+  
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
       <div>
         <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
-          Tool Name
+          Tool
         </label>
-        <input
-          type="text"
-          value={step.toolName}
-          onChange={(e) => onChange({ toolName: e.target.value })}
+        <select
+          value={isCustomTool ? 'custom' : step.toolName}
+          onChange={(e) => onChange({ toolName: e.target.value === 'custom' ? '' : e.target.value })}
           disabled={disabled}
-          placeholder="Enter tool name..."
           style={{
             width: '100%',
             padding: '0.4rem',
@@ -558,53 +633,148 @@ function ToolStepEditor({ step, onChange, disabled }: { step: ToolStep; onChange
             fontSize: '0.8rem',
             backgroundColor: '#fff',
           }}
-        />
+        >
+          <option value="">Select a tool...</option>
+          <optgroup label="Built-in Tools">
+            {BUILT_IN_TOOLS.map((tool) => (
+              <option key={tool.name} value={tool.name}>
+                {tool.name} - {tool.description}
+              </option>
+            ))}
+          </optgroup>
+        </select>
       </div>
+      
+      {isCustomTool && (
+        <div>
+          <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
+            Custom Tool Name
+          </label>
+          <input
+            type="text"
+            value={step.toolName}
+            onChange={(e) => onChange({ toolName: e.target.value })}
+            disabled={disabled}
+            placeholder="Enter custom tool name..."
+            style={{
+              width: '100%',
+              padding: '0.4rem',
+              border: '1px solid #e2e8f0',
+              borderRadius: '4px',
+              fontSize: '0.8rem',
+              backgroundColor: '#fff',
+            }}
+          />
+        </div>
+      )}
       
       <div style={{ display: 'flex', gap: '1rem' }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem' }}>
-          <input
-            type="checkbox"
-            checked={step.autoExecute}
-            onChange={(e) => onChange({ autoExecute: e.target.checked })}
+        <div style={{ flex: 1 }}>
+          <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
+            Mode
+          </label>
+          <select
+            value={step.toolStepMode || 'execute'}
+            onChange={(e) => onChange({ toolStepMode: e.target.value as 'execute' | 'inject' | 'executeAndInject' })}
             disabled={disabled}
-          />
-          Auto-execute
-        </label>
+            style={{
+              width: '100%',
+              padding: '0.4rem',
+              border: '1px solid #e2e8f0',
+              borderRadius: '4px',
+              fontSize: '0.8rem',
+              backgroundColor: '#fff',
+            }}
+          >
+            <option value="execute">Execute</option>
+            <option value="executeAndInject">Execute & Inject</option>
+            <option value="inject">Inject from Step</option>
+          </select>
+        </div>
         
-        <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem' }}>
-          <input
-            type="checkbox"
-            checked={step.continueOnFailure}
-            onChange={(e) => onChange({ continueOnFailure: e.target.checked })}
-            disabled={disabled}
-          />
-          Continue on failure
-        </label>
+        <div style={{ flex: 1 }}>
+          <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
+            Auto-execute
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem' }}>
+            <input
+              type="checkbox"
+              checked={step.autoExecute}
+              onChange={(e) => onChange({ autoExecute: e.target.checked })}
+              disabled={disabled}
+            />
+            Enable
+          </label>
+        </div>
+        
+        <div style={{ flex: 1 }}>
+          <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
+            Continue on failure
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem' }}>
+            <input
+              type="checkbox"
+              checked={step.continueOnFailure}
+              onChange={(e) => onChange({ continueOnFailure: e.target.checked })}
+              disabled={disabled}
+            />
+            Enable
+          </label>
+        </div>
       </div>
       
-      <div>
-        <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
-          Injection Prompt
-        </label>
-        <textarea
-          value={step.injectionPrompt}
-          onChange={(e) => onChange({ injectionPrompt: e.target.value })}
-          disabled={disabled}
-          rows={2}
-          placeholder="Use {{results}} to inject tool results..."
-          style={{
-            width: '100%',
-            padding: '0.5rem',
-            border: '1px solid #e2e8f0',
-            borderRadius: '4px',
-            fontSize: '0.8rem',
-            fontFamily: 'monospace',
-            resize: 'vertical',
-            backgroundColor: '#fff',
-          }}
-        />
-      </div>
+      {step.toolStepMode === 'inject' && (
+        <div>
+          <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
+            Reference Step
+          </label>
+          <select
+            value={step.toolRefStepId || ''}
+            onChange={(e) => onChange({ toolRefStepId: e.target.value })}
+            disabled={disabled}
+            style={{
+              width: '100%',
+              padding: '0.4rem',
+              border: '1px solid #e2e8f0',
+              borderRadius: '4px',
+              fontSize: '0.8rem',
+              backgroundColor: '#fff',
+            }}
+          >
+            <option value="">Select a step...</option>
+            {steps.filter(s => s.id !== step.id).map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name || s.type} ({s.type})
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      
+      {(step.toolStepMode === 'executeAndInject' || step.toolStepMode === 'inject') && (
+        <div>
+          <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
+            Injection Prompt
+          </label>
+          <textarea
+            value={step.injectionPrompt}
+            onChange={(e) => onChange({ injectionPrompt: e.target.value })}
+            disabled={disabled}
+            rows={2}
+            placeholder="Use {{results}} to inject tool results..."
+            style={{
+              width: '100%',
+              padding: '0.5rem',
+              border: '1px solid #e2e8f0',
+              borderRadius: '4px',
+              fontSize: '0.8rem',
+              fontFamily: 'monospace',
+              resize: 'vertical',
+              backgroundColor: '#fff',
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }
