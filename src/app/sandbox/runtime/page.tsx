@@ -8,6 +8,8 @@ import {
   PromptStep,
   ToolStep,
   LoopStep,
+  ToolStepMode,
+  ContextOutputMode,
   createSpecId,
   createDefaultPromptStep,
   createDefaultToolStep,
@@ -28,7 +30,7 @@ export default function RuntimeBuilder() {
   
   const [userQuery, setUserQuery] = useState('');
   const [selectedProfileId, setSelectedProfileId] = useState<string>('');
-  const [executionResults, setExecutionResults] = useState<Record<string, { output?: string; success: boolean; error?: string; duration?: number }>>({});
+  const [executionResults, setExecutionResults] = useState<Record<string, { output?: string; success: boolean; error?: string; duration?: number; reasoning?: string; includedInContext?: boolean }>>({});
   const [isRunning, setIsRunning] = useState(false);
   const [currentStepIndex, setCurrentStepIndex] = useState(-1);
   const [expandedLoops, setExpandedLoops] = useState<Set<string>>(new Set());
@@ -544,7 +546,7 @@ export default function RuntimeBuilder() {
             </div>
             
             <div>
-              {activeSpec.steps.map((step, index) => renderStepEditor(step, index))}
+              {activeSpec.steps.map((step) => renderStepEditor(step))}
               
               {activeSpec.steps.length === 0 && (
                 <div style={{ textAlign: 'center', padding: '3rem', color: '#94a3b8', border: '2px dashed #e2e8f0', borderRadius: '8px' }}>
@@ -580,6 +582,7 @@ export default function RuntimeBuilder() {
         
         {Object.entries(executionResults).map(([stepId, result], index) => {
           const step = activeSpec?.steps.find(s => s.id === stepId);
+          const includedInContext = step?.includeInContext ?? true;
           return (
             <div
               key={stepId}
@@ -614,6 +617,9 @@ export default function RuntimeBuilder() {
                 <span style={{ fontSize: '0.8rem', fontWeight: 600, flex: 1 }}>
                   {step?.name || stepId}
                 </span>
+                <span style={{ fontSize: '0.65rem', color: includedInContext ? '#10b981' : '#94a3b8', padding: '0.15rem 0.4rem', backgroundColor: includedInContext ? '#dcfce7' : '#f1f5f9', borderRadius: '3px' }}>
+                  {includedInContext ? 'In Context' : 'Excluded'}
+                </span>
                 {result.duration && (
                   <span style={{ fontSize: '0.7rem', color: '#64748b' }}>
                     {result.duration}ms
@@ -629,6 +635,12 @@ export default function RuntimeBuilder() {
                 ) : (
                   <div style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', color: '#374151' }}>
                     {result.output || '(no output)'}
+                  </div>
+                )}
+                {result.reasoning && (
+                  <div style={{ marginTop: '0.5rem', padding: '0.5rem', backgroundColor: '#fef3c7', borderRadius: '4px', fontSize: '0.75rem' }}>
+                    <div style={{ fontWeight: 600, color: '#92400e', marginBottom: '0.25rem' }}>Thinking:</div>
+                    <div style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', color: '#78350f' }}>{result.reasoning}</div>
                   </div>
                 )}
               </div>
@@ -731,6 +743,40 @@ function PromptStepEditor({ step, onChange, disabled }: { step: PromptStep; onCh
           }}
         />
       </div>
+
+      <div style={{ marginTop: '0.5rem', padding: '0.75rem', backgroundColor: '#f8fafc', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', marginBottom: '0.5rem' }}>
+          Context Output
+        </div>
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem' }}>
+            <input
+              type="checkbox"
+              checked={step.includeInContext ?? true}
+              onChange={(e) => onChange({ includeInContext: e.target.checked })}
+              disabled={disabled}
+            />
+            Include in Context
+          </label>
+          <select
+            value={step.contextOutputMode || 'responseOnly'}
+            onChange={(e) => onChange({ contextOutputMode: e.target.value as ContextOutputMode })}
+            disabled={disabled}
+            style={{
+              padding: '0.25rem 0.5rem',
+              border: '1px solid #e2e8f0',
+              borderRadius: '4px',
+              fontSize: '0.75rem',
+              backgroundColor: '#fff',
+            }}
+          >
+            <option value="responseOnly">Response Only</option>
+            <option value="all">All (Response + Thinking)</option>
+            <option value="thinkingOnly">Thinking Only</option>
+            <option value="none">None</option>
+          </select>
+        </div>
+      </div>
     </div>
   );
 }
@@ -800,7 +846,7 @@ function ToolStepEditor({ step, steps, onChange, disabled }: { step: ToolStep; s
           </label>
           <select
             value={step.toolStepMode || 'execute'}
-            onChange={(e) => onChange({ toolStepMode: e.target.value as 'execute' | 'inject' | 'executeAndInject' })}
+            onChange={(e) => onChange({ toolStepMode: e.target.value as ToolStepMode })}
             disabled={disabled}
             style={{
               width: '100%',
@@ -814,6 +860,8 @@ function ToolStepEditor({ step, steps, onChange, disabled }: { step: ToolStep; s
             <option value="execute">Execute</option>
             <option value="executeAndInject">Execute & Inject</option>
             <option value="inject">Inject from Step</option>
+            <option value="present">Present to Model</option>
+            <option value="forceExecute">Force Tool Call</option>
           </select>
         </div>
         
@@ -900,6 +948,40 @@ function ToolStepEditor({ step, steps, onChange, disabled }: { step: ToolStep; s
           />
         </div>
       )}
+
+      <div style={{ marginTop: '0.5rem', padding: '0.75rem', backgroundColor: '#f8fafc', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', marginBottom: '0.5rem' }}>
+          Context Output
+        </div>
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem' }}>
+            <input
+              type="checkbox"
+              checked={step.includeInContext ?? true}
+              onChange={(e) => onChange({ includeInContext: e.target.checked })}
+              disabled={disabled}
+            />
+            Include in Context
+          </label>
+          <select
+            value={step.contextOutputMode || 'responseOnly'}
+            onChange={(e) => onChange({ contextOutputMode: e.target.value as ContextOutputMode })}
+            disabled={disabled}
+            style={{
+              padding: '0.25rem 0.5rem',
+              border: '1px solid #e2e8f0',
+              borderRadius: '4px',
+              fontSize: '0.75rem',
+              backgroundColor: '#fff',
+            }}
+          >
+            <option value="responseOnly">Response Only</option>
+            <option value="all">All (Response + Thinking)</option>
+            <option value="thinkingOnly">Thinking Only</option>
+            <option value="none">None</option>
+          </select>
+        </div>
+      </div>
     </div>
   );
 }
@@ -988,6 +1070,40 @@ function LoopStepEditor({ step, onChange, disabled }: { step: LoopStep; onChange
           />
           Continue on failure
         </label>
+      </div>
+
+      <div style={{ marginTop: '0.5rem', padding: '0.75rem', backgroundColor: '#f8fafc', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', marginBottom: '0.5rem' }}>
+          Context Output
+        </div>
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem' }}>
+            <input
+              type="checkbox"
+              checked={step.includeInContext ?? true}
+              onChange={(e) => onChange({ includeInContext: e.target.checked })}
+              disabled={disabled}
+            />
+            Include in Context
+          </label>
+          <select
+            value={step.contextOutputMode || 'responseOnly'}
+            onChange={(e) => onChange({ contextOutputMode: e.target.value as ContextOutputMode })}
+            disabled={disabled}
+            style={{
+              padding: '0.25rem 0.5rem',
+              border: '1px solid #e2e8f0',
+              borderRadius: '4px',
+              fontSize: '0.75rem',
+              backgroundColor: '#fff',
+            }}
+          >
+            <option value="responseOnly">Response Only</option>
+            <option value="all">All (Response + Thinking)</option>
+            <option value="thinkingOnly">Thinking Only</option>
+            <option value="none">None</option>
+          </select>
+        </div>
       </div>
       
       <div style={{ fontSize: '0.75rem', color: '#64748b', padding: '0.5rem', backgroundColor: '#f8fafc', borderRadius: '4px' }}>
