@@ -6,6 +6,7 @@ import {
   RuntimeEventHandler,
   RuntimeStepStatus,
   StepResult,
+  StepOutput,
   PromptStep,
   ToolStep,
   LoopStep,
@@ -67,6 +68,20 @@ export class RuntimeExecutor {
     return this.executionState.stepStatuses[stepId] || 'pending';
   }
 
+  getStepOutput(stepId: string): StepOutput | undefined {
+    return this.executionState.stepOutputs[stepId];
+  }
+
+  setStepOutput(stepId: string, output: StepOutput) {
+    this.executionState.stepOutputs[stepId] = output;
+  }
+
+  toggleStepOutputInclusion(stepId: string, included: boolean) {
+    if (this.executionState.stepOutputs[stepId]) {
+      this.executionState.stepOutputs[stepId].includedInContext = included;
+    }
+  }
+
   private updateStepStatus(stepId: string, status: RuntimeStepStatus) {
     this.executionState.stepStatuses[stepId] = status;
   }
@@ -96,6 +111,10 @@ export class RuntimeExecutor {
 
     this.executionState.isRunning = true;
     this.executionState.startedAt = new Date().toISOString();
+    this.executionState.currentInput = input;
+    this.executionState.stepOutputs = {};
+    this.executionState.stepContexts = {};
+
     this.context = {
       config,
       input,
@@ -210,6 +229,14 @@ export class RuntimeExecutor {
 
     this.context.accumulatedContext += response.content;
 
+    const stepOutput: StepOutput = {
+      stepId: step.id,
+      rawOutput: response.content,
+      includedInContext: true,
+      reasoning: response.reasoning,
+    };
+    this.executionState.stepOutputs[step.id] = stepOutput;
+
     return {
       stepId: step.id,
       success: true,
@@ -221,12 +248,30 @@ export class RuntimeExecutor {
   private async executeToolStep(step: ToolStep): Promise<StepResult> {
     if (!this.context) throw new Error('No execution context');
 
-    if (step.autoExecute) {
-      const toolResult = await this.executeTool(step.toolName, this.context.toolResults);
-      this.context.toolResults[step.toolName] = toolResult;
+    let toolOutput = '';
+    let toolReasoning: string | undefined;
 
-      const injectedContent = step.injectionPrompt.replace('{{results}}', JSON.stringify(toolResult));
-      this.context.input = this.context.input + '\n' + injectedContent;
+    if (step.toolStepMode === 'execute' || step.toolStepMode === 'executeAndInject') {
+      if (step.autoExecute) {
+        const toolResult = await this.executeTool(step.toolName, this.context.toolResults);
+        this.context.toolResults[step.toolName] = toolResult;
+        
+        toolOutput = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult, null, 2);
+        
+        if (step.toolStepMode === 'executeAndInject') {
+          const injectedContent = step.injectionPrompt.replace('{{results}}', toolOutput);
+          this.context.input = this.context.input + '\n' + injectedContent;
+        }
+      }
+    }
+
+    if (step.toolStepMode === 'inject' && step.toolRefStepId) {
+      const refOutput = this.executionState.stepOutputs[step.toolRefStepId];
+      if (refOutput) {
+        toolOutput = refOutput.rawOutput;
+        const injectedContent = step.injectionPrompt.replace('{{results}}', toolOutput);
+        this.context.input = this.context.input + '\n' + injectedContent;
+      }
     }
 
     const response = await this.runtimeEngine.run(
@@ -236,6 +281,16 @@ export class RuntimeExecutor {
       this.context.overrides,
       this.context.options
     );
+
+    this.context.accumulatedContext += response.content;
+
+    const stepOutput: StepOutput = {
+      stepId: step.id,
+      rawOutput: response.content,
+      includedInContext: true,
+      reasoning: response.reasoning,
+    };
+    this.executionState.stepOutputs[step.id] = stepOutput;
 
     return {
       stepId: step.id,
@@ -288,10 +343,19 @@ export class RuntimeExecutor {
       });
     }
 
+    const combinedOutput = allOutputs.join('\n---\n');
+    
+    const stepOutput: StepOutput = {
+      stepId: step.id,
+      rawOutput: combinedOutput,
+      includedInContext: true,
+    };
+    this.executionState.stepOutputs[step.id] = stepOutput;
+
     return {
       stepId: step.id,
       success: true,
-      output: allOutputs.join('\n---\n'),
+      output: combinedOutput,
       duration: 0,
     };
   }
