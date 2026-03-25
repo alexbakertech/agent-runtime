@@ -25,6 +25,13 @@ const pages = [
     color: '#f59e0b',
   },
   {
+    href: '/sandbox/runtime',
+    title: 'Runtime Builder',
+    description: 'Create custom runtimes with Prompt, Tool, and Loop steps.',
+    icon: '🔗',
+    color: '#ec4899',
+  },
+  {
     href: '/export',
     title: 'State',
     description: 'Export, import, and manage application state.',

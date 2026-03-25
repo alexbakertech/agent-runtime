@@ -1,8 +1,8 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
-import type { AppState, Profile, GlobalSettings, ContextEngineState, SandboxState, ChatAgentAppState, ChatAgentUIState, SandboxAppState, SandboxUIState } from './types';
-import { createDefaultState, createDefaultProfile, createDefaultContextEngineState, createDefaultSandboxState, createDefaultChatAgentAppState, createDefaultChatAgentUIState, createDefaultSandboxAppState, createDefaultSandboxUIState } from './defaults';
+import type { AppState, Profile, GlobalSettings, ContextEngineState, SandboxState, ChatAgentAppState, ChatAgentUIState, SandboxAppState, SandboxUIState, RuntimeSpecState } from './types';
+import { createDefaultState, createDefaultProfile, createDefaultContextEngineState, createDefaultSandboxState, createDefaultChatAgentAppState, createDefaultChatAgentUIState, createDefaultSandboxAppState, createDefaultSandboxUIState, createDefaultRuntimeSpecAppState } from './defaults';
 import { loadState, saveState, exportCurrentState } from './storage';
 import { exportState, createExportOptions, generateExportFilename, downloadExport } from './export';
 import { previewImport, applyImport, validateImportJson } from './import';
@@ -40,6 +40,9 @@ interface StateContextValue {
   
   sandbox: SandboxState;
   updateSandbox: (updates: Partial<SandboxState>) => void;
+  
+  runtimeSpec: RuntimeSpecState;
+  updateRuntimeSpec: (updates: Partial<RuntimeSpecState>) => void;
   
   // Reset
   resetToDefaults: (keepProfiles?: boolean) => void;
@@ -284,6 +287,26 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
     });
   }, [defaultSandboxApp, defaultSandboxUI, defaultSandbox]);
 
+  // Runtime spec state
+  const defaultRuntimeSpec = createDefaultRuntimeSpecAppState();
+  const runtimeSpecAppState = state?.pageAppStates?.runtimeSpec;
+  const runtimeSpec: RuntimeSpecState = runtimeSpecAppState
+    ? { ...defaultRuntimeSpec, ...runtimeSpecAppState }
+    : defaultRuntimeSpec;
+
+  const updateRuntimeSpec = useCallback((updates: Partial<RuntimeSpecState>) => {
+    setState(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        pageAppStates: {
+          ...prev.pageAppStates,
+          runtimeSpec: { ...prev.pageAppStates?.runtimeSpec, ...updates } as RuntimeSpecState,
+        },
+      };
+    });
+  }, []);
+
   // Reset
   const resetToDefaults = useCallback((keepProfiles: boolean = true) => {
     setState(prev => {
@@ -355,6 +378,8 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
     updateContextEngine,
     sandbox,
     updateSandbox,
+    runtimeSpec,
+    updateRuntimeSpec,
     resetToDefaults,
     getExportData,
     downloadExportFile,
@@ -407,4 +432,9 @@ export function useBrowserConsent() {
 export function useRetryEnabled() {
   const { retryEnabled, setRetryEnabled } = useAppState();
   return { retryEnabled, setRetryEnabled };
+}
+
+export function useRuntimeSpec() {
+  const { runtimeSpec, updateRuntimeSpec } = useAppState();
+  return { runtimeSpec, updateRuntimeSpec };
 }

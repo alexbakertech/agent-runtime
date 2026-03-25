@@ -45,6 +45,9 @@ export default function RootLayout({
           <Link href="/sandbox/tools" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
             Tools Sandbox
           </Link>
+          <Link href="/sandbox/runtime" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
+            Runtime Builder
+          </Link>
           <Link href="/configure" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
             Configure & Test
           </Link>

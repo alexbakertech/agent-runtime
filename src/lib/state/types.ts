@@ -90,6 +90,9 @@ export interface PageAppStates {
   
   /** Sandbox page app state */
   sandbox?: SandboxAppState;
+  
+  /** Runtime Spec page app state */
+  runtimeSpec?: RuntimeSpecState;
 }
 
 /**
@@ -129,7 +132,7 @@ export type SandboxUIState = Pick<SandboxState, 'expandedTools' | 'builtInToolsE
 /**
  * Runtime Spec UI state.
  */
-export type RuntimeSpecUIState = Pick<RuntimeSpecState, 'showRawJson'>;
+export type RuntimeSpecUIState = Pick<RuntimeSpecState, 'showRawJson' | 'activeRuntimeSpecId' | 'isLocked'>;
 
 /**
  * Context Engine page state.
@@ -365,13 +368,30 @@ export interface ValidationResult {
   warnings?: string[];
 }
 
+import { RuntimeSpec, RuntimeExecutionState, RuntimeStep } from '@/lib/runtime/spec/types';
+
 /**
  * Runtime Spec page state.
- * Minimal state - mostly UI preferences.
+ * Manages runtime specifications and execution state.
  */
 export interface RuntimeSpecState {
   /** Whether to show raw JSON view */
   showRawJson: boolean;
+  
+  /** All saved runtime specifications */
+  runtimeSpecs: Record<string, RuntimeSpec>;
+  
+  /** Currently active/runtime-selected spec ID */
+  activeRuntimeSpecId: string | null;
+  
+  /** Current execution state for active runs */
+  runtimeExecution: RuntimeExecutionState;
+  
+  /** Step draft being edited (not yet saved) */
+  stepDraft: RuntimeStep | null;
+  
+  /** Whether the runtime is currently locked (running) */
+  isLocked: boolean;
 }
 
 /**

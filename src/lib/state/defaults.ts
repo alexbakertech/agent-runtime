@@ -17,8 +17,10 @@ import type {
   SandboxAppState,
   SandboxUIState,
   RuntimeSpecUIState,
+  RuntimeSpecState,
 } from './types';
 import { CURRENT_VERSION } from './types';
+import { RuntimeSpec, RuntimeExecutionState, createChatAgentRuntimeSpec } from '@/lib/runtime/spec/types';
 
 const DEFAULT_SYSTEM_PROMPT = "You are a helpful AI assistant. Answer concisely.";
 
@@ -87,6 +89,33 @@ function createDefaultSandboxUIState(): SandboxUIState {
 function createDefaultRuntimeSpecUIState(): RuntimeSpecUIState {
   return {
     showRawJson: false,
+    activeRuntimeSpecId: null,
+    isLocked: false,
+  };
+}
+
+function createDefaultRuntimeExecutionState(): RuntimeExecutionState {
+  return {
+    runtimeSpecId: null,
+    isRunning: false,
+    currentStepIndex: 0,
+    currentIteration: 0,
+    stepStatuses: {},
+    results: {},
+    startedAt: null,
+    finishedAt: null,
+  };
+}
+
+function createDefaultRuntimeSpecState(): RuntimeSpecState {
+  const chatAgentSpec = createChatAgentRuntimeSpec();
+  return {
+    showRawJson: false,
+    runtimeSpecs: { [chatAgentSpec.id]: chatAgentSpec },
+    activeRuntimeSpecId: chatAgentSpec.id,
+    runtimeExecution: createDefaultRuntimeExecutionState(),
+    stepDraft: null,
+    isLocked: false,
   };
 }
 
@@ -94,6 +123,7 @@ function createDefaultPageAppStates(): PageAppStates {
   return {
     chatAgent: createDefaultChatAgentAppState(),
     sandbox: createDefaultSandboxAppState(),
+    runtimeSpec: createDefaultRuntimeSpecState(),
   };
 }
 
@@ -174,4 +204,8 @@ export function createDefaultSandboxState(): SandboxState {
     ...createDefaultSandboxAppState(),
     ...createDefaultSandboxUIState(),
   };
+}
+
+export function createDefaultRuntimeSpecAppState(): RuntimeSpecState {
+  return createDefaultRuntimeSpecState();
 }
