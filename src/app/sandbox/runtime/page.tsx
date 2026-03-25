@@ -28,6 +28,9 @@ export default function RuntimeBuilder() {
   
   const [userQuery, setUserQuery] = useState('');
   const [selectedProfileId, setSelectedProfileId] = useState<string>('');
+  const [executionResults, setExecutionResults] = useState<Record<string, { output?: string; success: boolean; error?: string; duration?: number }>>({});
+  const [isRunning, setIsRunning] = useState(false);
+  const [currentStepIndex, setCurrentStepIndex] = useState(-1);
   
   const { runtimeSpecs, activeRuntimeSpecId, isLocked } = runtimeSpec;
   
@@ -264,7 +267,7 @@ export default function RuntimeBuilder() {
   
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 60px)', fontFamily: 'system-ui', color: '#1a1a1a', backgroundColor: '#fdfdfd' }}>
-      <aside style={{ width: '280px', backgroundColor: '#f8fafc', borderRight: '1px solid #e2e8f0', padding: '1rem', overflowY: 'auto' }}>
+      <aside style={{ width: '260px', backgroundColor: '#f8fafc', borderRight: '1px solid #e2e8f0', padding: '1rem', overflowY: 'auto' }}>
         <div style={{ marginBottom: '1.5rem' }}>
           <h2 style={{ fontSize: '0.8rem', fontWeight: 700, color: '#64748b', marginBottom: '0.75rem' }}>
             RUNTIME SPECS
@@ -530,6 +533,101 @@ export default function RuntimeBuilder() {
           </div>
         )}
       </main>
+      
+      <aside style={{ width: '320px', backgroundColor: '#fafafa', borderLeft: '1px solid #e2e8f0', padding: '1rem', overflowY: 'auto' }}>
+        <h3 style={{ fontSize: '0.8rem', fontWeight: 700, color: '#64748b', marginBottom: '1rem' }}>
+          OUTPUT
+        </h3>
+        
+        {isRunning && (
+          <div style={{ padding: '1rem', backgroundColor: '#fef3c7', borderRadius: '6px', marginBottom: '1rem', fontSize: '0.8rem', color: '#92400e' }}>
+            Running step {currentStepIndex + 1}...
+          </div>
+        )}
+        
+        {Object.keys(executionResults).length === 0 && !isRunning && (
+          <div style={{ textAlign: 'center', padding: '2rem 1rem', color: '#94a3b8', fontSize: '0.8rem' }}>
+            Run the runtime to see outputs here.
+          </div>
+        )}
+        
+        {Object.entries(executionResults).map(([stepId, result], index) => {
+          const step = activeSpec?.steps.find(s => s.id === stepId);
+          return (
+            <div
+              key={stepId}
+              style={{
+                backgroundColor: '#fff',
+                border: '1px solid #e2e8f0',
+                borderRadius: '6px',
+                marginBottom: '0.75rem',
+                overflow: 'hidden',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '0.5rem 0.75rem',
+                  backgroundColor: result.success ? '#f0fdf4' : '#fef2f2',
+                  borderBottom: '1px solid #e2e8f0',
+                  gap: '0.5rem',
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: '0.65rem',
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    color: step?.type === 'prompt' ? '#3b82f6' : step?.type === 'tool' ? '#10b981' : '#f59e0b',
+                  }}
+                >
+                  {step?.type || 'step'}
+                </span>
+                <span style={{ fontSize: '0.8rem', fontWeight: 600, flex: 1 }}>
+                  {step?.name || stepId}
+                </span>
+                {result.duration && (
+                  <span style={{ fontSize: '0.7rem', color: '#64748b' }}>
+                    {result.duration}ms
+                  </span>
+                )}
+              </div>
+              
+              <div style={{ padding: '0.75rem', fontSize: '0.8rem', maxHeight: '200px', overflowY: 'auto' }}>
+                {result.error ? (
+                  <div style={{ color: '#ef4444', fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
+                    {result.error}
+                  </div>
+                ) : (
+                  <div style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', color: '#374151' }}>
+                    {result.output || '(no output)'}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+        
+        {Object.keys(executionResults).length > 0 && (
+          <div
+            style={{
+              backgroundColor: '#f0f9ff',
+              border: '1px solid #0ea5e9',
+              borderRadius: '6px',
+              padding: '1rem',
+              marginTop: '1rem',
+            }}
+          >
+            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#0369a1', marginBottom: '0.5rem' }}>
+              FINAL OUTPUT
+            </div>
+            <div style={{ fontSize: '0.8rem', fontFamily: 'monospace', whiteSpace: 'pre-wrap', color: '#1e40af' }}>
+              {Object.values(executionResults).slice(-1)[0]?.output || '(no output)'}
+            </div>
+          </div>
+        )}
+      </aside>
     </div>
   );
 }
