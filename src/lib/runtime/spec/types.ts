@@ -19,9 +19,13 @@ export interface PromptStep extends BaseStep {
   injectionPosition: 'start' | 'end';
 }
 
+export type ToolStepMode = 'execute' | 'inject' | 'executeAndInject';
+
 export interface ToolStep extends BaseStep {
   type: 'tool';
   toolName: string;
+  toolStepMode: ToolStepMode;
+  toolRefStepId?: string;
   autoExecute: boolean;
   injectionPrompt: string;
   continueOnFailure: boolean;
@@ -49,6 +53,13 @@ export interface RuntimeSpec {
 
 export type RuntimeStepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 
+export interface StepOutput {
+  stepId: string;
+  rawOutput: string;
+  includedInContext: boolean;
+  reasoning?: string;
+}
+
 export interface RuntimeExecutionState {
   runtimeSpecId: string | null;
   isRunning: boolean;
@@ -56,6 +67,10 @@ export interface RuntimeExecutionState {
   currentIteration: number;
   stepStatuses: Record<string, RuntimeStepStatus>;
   results: Record<string, StepResult>;
+  stepOutputs: Record<string, StepOutput>;
+  stepContexts: Record<string, string>;
+  currentInput: string;
+  isStepMode: boolean;
   startedAt: string | null;
   finishedAt: string | null;
 }
@@ -107,6 +122,7 @@ export function createDefaultToolStep(): ToolStep {
     enabled: true,
     locked: false,
     toolName: '',
+    toolStepMode: 'executeAndInject',
     autoExecute: true,
     injectionPrompt: 'Here are the tool results:\n{{results}}',
     continueOnFailure: false,

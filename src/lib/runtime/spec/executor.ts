@@ -50,6 +50,10 @@ export class RuntimeExecutor {
       currentIteration: 0,
       stepStatuses: {},
       results: {},
+      stepOutputs: {},
+      stepContexts: {},
+      currentInput: '',
+      isStepMode: false,
       startedAt: null,
       finishedAt: null,
     };
