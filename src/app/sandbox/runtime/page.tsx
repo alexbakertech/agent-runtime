@@ -32,10 +32,12 @@ export default function RuntimeBuilder() {
   
   const [userQuery, setUserQuery] = useState('');
   const [selectedProfileId, setSelectedProfileId] = useState<string>('');
-  const [executionResults, setExecutionResults] = useState<Record<string, { output?: string; success: boolean; error?: string; duration?: number; reasoning?: string; includedInContext?: boolean }>>({});
+  const [executionResults, setExecutionResults] = useState<Record<string, { output?: string; success: boolean; error?: string; duration?: number; reasoning?: string; includedInContext?: boolean; previousContext?: string; stepContext?: string; sentToNext?: string }>>({});
   const [isRunning, setIsRunning] = useState(false);
   const [currentStepIndex, setCurrentStepIndex] = useState(-1);
   const [expandedLoops, setExpandedLoops] = useState<Set<string>>(new Set());
+  const [expandedOutputs, setExpandedOutputs] = useState<Set<string>>(new Set());
+  const [expandedContexts, setExpandedContexts] = useState<Set<string>>(new Set());
   const executorRef = useRef<RuntimeExecutor | null>(null);
   
   const { runtimeSpecs, activeRuntimeSpecId, isLocked } = runtimeSpec;
@@ -183,6 +185,30 @@ export default function RuntimeBuilder() {
     });
   };
 
+  const toggleOutputExpanded = (stepId: string) => {
+    setExpandedOutputs(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(stepId)) {
+        newSet.delete(stepId);
+      } else {
+        newSet.add(stepId);
+      }
+      return newSet;
+    });
+  };
+
+  const toggleContextExpanded = (stepId: string) => {
+    setExpandedContexts(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(stepId)) {
+        newSet.delete(stepId);
+      } else {
+        newSet.add(stepId);
+      }
+      return newSet;
+    });
+  };
+
   const handleRun = useCallback(async () => {
     if (!activeSpec || !activeProfile) return;
 
@@ -217,7 +243,7 @@ export default function RuntimeBuilder() {
 
       const stepOutputs = executor.getExecutionState().stepOutputs;
 
-      const formattedResults: Record<string, { output?: string; success: boolean; error?: string; duration?: number; reasoning?: string; includedInContext?: boolean }> = {};
+      const formattedResults: Record<string, { output?: string; success: boolean; error?: string; duration?: number; reasoning?: string; includedInContext?: boolean; previousContext?: string; stepContext?: string; sentToNext?: string }> = {};
       
       Object.entries(results).forEach(([stepId, result]) => {
         const stepOutput = stepOutputs[stepId];
@@ -228,6 +254,9 @@ export default function RuntimeBuilder() {
           duration: result.duration,
           reasoning: stepOutput?.reasoning,
           includedInContext: stepOutput?.includedInContext,
+          previousContext: stepOutput?.previousContext,
+          stepContext: stepOutput?.stepContext,
+          sentToNext: stepOutput?.sentToNext,
         };
       });
 
@@ -350,6 +379,108 @@ export default function RuntimeBuilder() {
             />
           )}
         </div>
+
+        {executionResults[step.id] && (
+          <>
+            <div style={{ borderTop: '1px solid #e2e8f0' }}>
+              <button
+                onClick={() => toggleOutputExpanded(step.id)}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '0.5rem 1rem',
+                  backgroundColor: '#f0fdf4',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  color: '#166534',
+                }}
+              >
+                <span>▶ OUTPUT</span>
+                <span>{expandedOutputs.has(step.id) ? '▼' : '▶'}</span>
+              </button>
+              {expandedOutputs.has(step.id) && (
+                <div style={{ padding: '0.75rem 1rem', fontSize: '0.8rem', backgroundColor: '#fafafa' }}>
+                  {executionResults[step.id].error ? (
+                    <div style={{ color: '#ef4444', fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
+                      {executionResults[step.id].error}
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ marginBottom: '0.5rem' }}>
+                        <span style={{ fontWeight: 600, color: '#374151' }}>Response:</span>
+                        <div style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', marginTop: '0.25rem', padding: '0.5rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+                          {executionResults[step.id].output || '(no output)'}
+                        </div>
+                      </div>
+                      {executionResults[step.id].reasoning && (
+                        <div style={{ marginTop: '0.5rem' }}>
+                          <span style={{ fontWeight: 600, color: '#92400e' }}>Thinking:</span>
+                          <div style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', marginTop: '0.25rem', padding: '0.5rem', backgroundColor: '#fef3c7', borderRadius: '4px', fontSize: '0.75rem', color: '#78350f' }}>
+                            {executionResults[step.id].reasoning}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div style={{ borderTop: '1px solid #e2e8f0' }}>
+              <button
+                onClick={() => toggleContextExpanded(step.id)}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '0.5rem 1rem',
+                  backgroundColor: executionResults[step.id].includedInContext ? '#dbeafe' : '#f1f5f9',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  color: executionResults[step.id].includedInContext ? '#1e40af' : '#64748b',
+                }}
+              >
+                <span>▶ CONTEXT TO MODEL {executionResults[step.id].includedInContext ? '(SENDING)' : '(NOT SENDING)'}</span>
+                <span>{expandedContexts.has(step.id) ? '▼' : '▶'}</span>
+              </button>
+              {expandedContexts.has(step.id) && (
+                <div style={{ padding: '0.75rem 1rem', fontSize: '0.75rem', backgroundColor: '#fafafa' }}>
+                  {executionResults[step.id].previousContext && (
+                    <div style={{ marginBottom: '0.75rem' }}>
+                      <span style={{ fontWeight: 600, color: '#64748b' }}>Previous Context:</span>
+                      <div style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', marginTop: '0.25rem', padding: '0.5rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0', maxHeight: '100px', overflowY: 'auto', fontSize: '0.7rem' }}>
+                        {executionResults[step.id].previousContext}
+                      </div>
+                    </div>
+                  )}
+                  {executionResults[step.id].stepContext && (
+                    <div style={{ marginBottom: '0.75rem' }}>
+                      <span style={{ fontWeight: 600, color: '#64748b' }}>Step Context:</span>
+                      <div style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', marginTop: '0.25rem', padding: '0.5rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '0.7rem' }}>
+                        {executionResults[step.id].stepContext}
+                      </div>
+                    </div>
+                  )}
+                  {executionResults[step.id].sentToNext && (
+                    <div style={{ marginBottom: '0.5rem' }}>
+                      <span style={{ fontWeight: 600, color: executionResults[step.id].includedInContext ? '#166534' : '#94a3b8' }}>Sent to Next Step:</span>
+                      <div style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', marginTop: '0.25rem', padding: '0.5rem', backgroundColor: executionResults[step.id].includedInContext ? '#dcfce7' : '#f1f5f9', borderRadius: '4px', border: `1px solid ${executionResults[step.id].includedInContext ? '#86efac' : '#e2e8f0'}`, maxHeight: '100px', overflowY: 'auto', fontSize: '0.7rem' }}>
+                        {executionResults[step.id].sentToNext}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </>
+        )}
       </div>
     );
   };
@@ -637,93 +768,25 @@ export default function RuntimeBuilder() {
         
         {Object.keys(executionResults).length === 0 && !isRunning && (
           <div style={{ textAlign: 'center', padding: '2rem 1rem', color: '#94a3b8', fontSize: '0.8rem' }}>
-            Run the runtime to see outputs here.
+            Outputs appear inline with each step above.
           </div>
         )}
-        
-        {Object.entries(executionResults).map(([stepId, result], index) => {
-          const step = activeSpec?.steps.find(s => s.id === stepId);
-          const includedInContext = step?.includeInContext ?? true;
-          return (
-            <div
-              key={stepId}
-              style={{
-                backgroundColor: '#fff',
-                border: '1px solid #e2e8f0',
-                borderRadius: '6px',
-                marginBottom: '0.75rem',
-                overflow: 'hidden',
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  padding: '0.5rem 0.75rem',
-                  backgroundColor: result.success ? '#f0fdf4' : '#fef2f2',
-                  borderBottom: '1px solid #e2e8f0',
-                  gap: '0.5rem',
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: '0.65rem',
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    color: step?.type === 'prompt' ? '#3b82f6' : step?.type === 'tool' ? '#10b981' : '#f59e0b',
-                  }}
-                >
-                  {step?.type || 'step'}
-                </span>
-                <span style={{ fontSize: '0.8rem', fontWeight: 600, flex: 1 }}>
-                  {step?.name || stepId}
-                </span>
-                <span style={{ fontSize: '0.65rem', color: includedInContext ? '#10b981' : '#94a3b8', padding: '0.15rem 0.4rem', backgroundColor: includedInContext ? '#dcfce7' : '#f1f5f9', borderRadius: '3px' }}>
-                  {includedInContext ? 'In Context' : 'Excluded'}
-                </span>
-                {result.duration && (
-                  <span style={{ fontSize: '0.7rem', color: '#64748b' }}>
-                    {result.duration}ms
-                  </span>
-                )}
-              </div>
-              
-              <div style={{ padding: '0.75rem', fontSize: '0.8rem', maxHeight: '200px', overflowY: 'auto' }}>
-                {result.error ? (
-                  <div style={{ color: '#ef4444', fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
-                    {result.error}
-                  </div>
-                ) : (
-                  <div style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', color: '#374151' }}>
-                    {result.output || '(no output)'}
-                  </div>
-                )}
-                {result.reasoning && (
-                  <div style={{ marginTop: '0.5rem', padding: '0.5rem', backgroundColor: '#fef3c7', borderRadius: '4px', fontSize: '0.75rem' }}>
-                    <div style={{ fontWeight: 600, color: '#92400e', marginBottom: '0.25rem' }}>Thinking:</div>
-                    <div style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', color: '#78350f' }}>{result.reasoning}</div>
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
         
         {Object.keys(executionResults).length > 0 && (
           <div
             style={{
-              backgroundColor: '#f0f9ff',
-              border: '1px solid #0ea5e9',
+              backgroundColor: '#f0fdf4',
+              border: '1px solid #86efac',
               borderRadius: '6px',
-              padding: '1rem',
-              marginTop: '1rem',
+              padding: '0.75rem',
+              marginTop: '0.5rem',
             }}
           >
-            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#0369a1', marginBottom: '0.5rem' }}>
-              FINAL OUTPUT
+            <div style={{ fontSize: '0.7rem', fontWeight: 600, color: '#166534', marginBottom: '0.25rem' }}>
+              EXECUTION COMPLETE
             </div>
-            <div style={{ fontSize: '0.8rem', fontFamily: 'monospace', whiteSpace: 'pre-wrap', color: '#1e40af' }}>
-              {Object.values(executionResults).slice(-1)[0]?.output || '(no output)'}
+            <div style={{ fontSize: '0.75rem', color: '#15803d' }}>
+              {Object.keys(executionResults).length} steps executed
             </div>
           </div>
         )}

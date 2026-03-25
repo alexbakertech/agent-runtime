@@ -62,6 +62,9 @@ export interface StepOutput {
   rawOutput: string;
   includedInContext: boolean;
   reasoning?: string;
+  previousContext?: string;
+  stepContext?: string;
+  sentToNext?: string;
 }
 
 export interface RuntimeExecutionState {

@@ -212,15 +212,20 @@ export class RuntimeExecutor {
   private async executePromptStep(step: PromptStep): Promise<StepResult> {
     if (!this.context) throw new Error('No execution context');
 
+    const previousContext = this.context.input;
     const promptContent = step.content;
+    let stepContext = '';
 
     if (step.promptType === 'system') {
       this.context.options.prefix = promptContent;
       this.context.options.prefixEnabled = true;
+      stepContext = `[SYSTEM PROMPT]: ${promptContent}`;
     } else if (step.promptType === 'user') {
       this.context.input = promptContent + '\n' + this.context.input;
+      stepContext = `[USER PROMPT]: ${promptContent}`;
     } else if (step.promptType === 'hidden') {
       this.context.input = promptContent + '\n' + this.context.input;
+      stepContext = `[HIDDEN PROMPT]: ${promptContent}`;
     }
 
     this.context.options.includeThinkingInContext = step.contextOutputMode === 'all' || step.contextOutputMode === 'thinkingOnly';
@@ -234,8 +239,11 @@ export class RuntimeExecutor {
     );
 
     const contentToInclude = this.determineContextContent(response.content, response.reasoning, step.contextOutputMode, step.includeInContext);
-    if (step.includeInContext) {
+    let sentToNext = '';
+    if (step.includeInContext && contentToInclude) {
+      this.context.input += '\n---\n' + contentToInclude;
       this.context.accumulatedContext += contentToInclude;
+      sentToNext = contentToInclude;
     }
 
     const stepOutput: StepOutput = {
@@ -243,6 +251,9 @@ export class RuntimeExecutor {
       rawOutput: response.content,
       includedInContext: step.includeInContext,
       reasoning: response.reasoning,
+      previousContext,
+      stepContext,
+      sentToNext,
     };
     this.executionState.stepOutputs[step.id] = stepOutput;
 
@@ -274,6 +285,8 @@ export class RuntimeExecutor {
   private async executeToolStep(step: ToolStep): Promise<StepResult> {
     if (!this.context) throw new Error('No execution context');
 
+    const previousContext = this.context.input;
+    let stepContext = '';
     let toolOutput = '';
     let toolReasoning: string | undefined;
 
@@ -283,22 +296,28 @@ export class RuntimeExecutor {
         this.context.toolResults[step.toolName] = toolResult;
         
         toolOutput = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult, null, 2);
+        stepContext = `[TOOL EXECUTE]: ${step.toolName}\nResult: ${toolOutput}`;
         
         if (step.toolStepMode === 'executeAndInject') {
           const injectedContent = step.injectionPrompt.replace('{{results}}', toolOutput);
           this.context.input = this.context.input + '\n' + injectedContent;
+          stepContext += `\n[INJECTED]: ${injectedContent}`;
         }
+      } else {
+        stepContext = `[TOOL EXECUTE]: ${step.toolName} (auto-execute disabled)`;
       }
     }
 
     if (step.toolStepMode === 'present') {
       const toolInfo = `You have access to the tool: ${step.toolName}. You may use it if needed.`;
       this.context.input = this.context.input + '\n' + toolInfo;
+      stepContext = `[PRESENT TO MODEL]: ${step.toolName}`;
     }
 
     if (step.toolStepMode === 'forceExecute') {
       const forcePrompt = `You must use the tool "${step.toolName}" to complete this task. Please call it now with appropriate arguments.`;
       this.context.input = this.context.input + '\n' + forcePrompt;
+      stepContext = `[FORCE TOOL CALL]: ${step.toolName}`;
     }
 
     if (step.toolStepMode === 'inject' && step.toolRefStepId) {
@@ -307,6 +326,7 @@ export class RuntimeExecutor {
         toolOutput = refOutput.rawOutput;
         const injectedContent = step.injectionPrompt.replace('{{results}}', toolOutput);
         this.context.input = this.context.input + '\n' + injectedContent;
+        stepContext = `[INJECT FROM STEP]: ${step.toolRefStepId}`;
       }
     }
 
@@ -321,8 +341,11 @@ export class RuntimeExecutor {
     );
 
     const contentToInclude = this.determineContextContent(response.content, response.reasoning, step.contextOutputMode, step.includeInContext);
-    if (step.includeInContext) {
+    let sentToNext = '';
+    if (step.includeInContext && contentToInclude) {
+      this.context.input += '\n---\n' + contentToInclude;
       this.context.accumulatedContext += contentToInclude;
+      sentToNext = contentToInclude;
     }
 
     const stepOutput: StepOutput = {
@@ -330,6 +353,9 @@ export class RuntimeExecutor {
       rawOutput: response.content,
       includedInContext: step.includeInContext,
       reasoning: response.reasoning,
+      previousContext,
+      stepContext,
+      sentToNext,
     };
     this.executionState.stepOutputs[step.id] = stepOutput;
 
@@ -396,16 +422,26 @@ export class RuntimeExecutor {
     }
 
     const combinedOutput = allOutputs.join('\n---\n');
+    const previousContext = this.context.input;
+    const stepContext = `[LOOP]: ${step.condition} (${step.maxIterations} iterations)`;
     
+    let sentToNext = '';
     if (step.includeInContext) {
       const contentToInclude = this.determineContextContent(combinedOutput, undefined, step.contextOutputMode, step.includeInContext);
-      this.context.accumulatedContext += contentToInclude;
+      if (contentToInclude) {
+        this.context.input += '\n---\n' + contentToInclude;
+        this.context.accumulatedContext += contentToInclude;
+        sentToNext = contentToInclude;
+      }
     }
 
     const stepOutput: StepOutput = {
       stepId: step.id,
       rawOutput: combinedOutput,
       includedInContext: step.includeInContext,
+      previousContext,
+      stepContext,
+      sentToNext,
     };
     this.executionState.stepOutputs[step.id] = stepOutput;
 
