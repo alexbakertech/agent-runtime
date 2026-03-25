@@ -342,7 +342,18 @@ export class RuntimeExecutor {
   }
 
   private async executeTool(toolName: string, toolArgs: Record<string, unknown>): Promise<unknown> {
-    return { toolName, args: toolArgs, executedAt: new Date().toISOString() };
+    switch (toolName) {
+      case 'get_time':
+        return { time: new Date().toISOString() };
+      case 'list_files':
+        return { files: ['file1.txt', 'file2.txt', 'folder/'], message: 'Sandbox is empty in demo mode' };
+      case 'read_file':
+        return { content: 'File content placeholder - implement actual file reading', filePath: toolArgs.filePath };
+      case 'search_text':
+        return { matches: [], message: 'No matches found (demo mode)' };
+      default:
+        return { toolName, args: toolArgs, executedAt: new Date().toISOString(), note: 'Demo mode - implement actual tool execution' };
+    }
   }
 
   private async executeLoopStep(step: LoopStep): Promise<StepResult> {

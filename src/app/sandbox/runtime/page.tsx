@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useCallback } from 'react';
 import { useRuntimeSpec, useProfiles, useSandbox } from '@/lib/state';
 import {
   RuntimeSpec,
@@ -15,6 +15,8 @@ import {
   createDefaultToolStep,
   createDefaultLoopStep,
 } from '@/lib/runtime/spec/types';
+import { RuntimeExecutor } from '@/lib/runtime/spec/executor';
+import { RuntimeConfig, Message } from '@/lib/runtime/types';
 
 const BUILT_IN_TOOLS = [
   { name: 'get_time', description: 'Returns the current system time' },
@@ -34,6 +36,7 @@ export default function RuntimeBuilder() {
   const [isRunning, setIsRunning] = useState(false);
   const [currentStepIndex, setCurrentStepIndex] = useState(-1);
   const [expandedLoops, setExpandedLoops] = useState<Set<string>>(new Set());
+  const executorRef = useRef<RuntimeExecutor | null>(null);
   
   const { runtimeSpecs, activeRuntimeSpecId, isLocked } = runtimeSpec;
   
@@ -179,7 +182,64 @@ export default function RuntimeBuilder() {
       return newSet;
     });
   };
-  
+
+  const handleRun = useCallback(async () => {
+    if (!activeSpec || !activeProfile) return;
+
+    const config: RuntimeConfig = {
+      baseUrl: activeProfile.baseUrl,
+      apiKey: activeProfile.apiKey,
+      model: activeProfile.model,
+    };
+
+    if (!executorRef.current) {
+      executorRef.current = new RuntimeExecutor((event) => {
+        if (event.type === 'stepStart') {
+          setCurrentStepIndex(event.stepIndex ?? -1);
+        }
+      });
+    }
+
+    const executor = executorRef.current;
+    await executor.loadSpec(activeSpec);
+
+    setIsRunning(true);
+    setExecutionResults({});
+
+    try {
+      const results = await executor.execute(
+        config,
+        userQuery,
+        [],
+        {},
+        { includeThinkingInContext: false }
+      );
+
+      const stepOutputs = executor.getExecutionState().stepOutputs;
+
+      const formattedResults: Record<string, { output?: string; success: boolean; error?: string; duration?: number; reasoning?: string; includedInContext?: boolean }> = {};
+      
+      Object.entries(results).forEach(([stepId, result]) => {
+        const stepOutput = stepOutputs[stepId];
+        formattedResults[stepId] = {
+          output: result.output,
+          success: result.success,
+          error: result.error,
+          duration: result.duration,
+          reasoning: stepOutput?.reasoning,
+          includedInContext: stepOutput?.includedInContext,
+        };
+      });
+
+      setExecutionResults(formattedResults);
+    } catch (err) {
+      console.error('Execution error:', err);
+    } finally {
+      setIsRunning(false);
+      setCurrentStepIndex(-1);
+    }
+  }, [activeSpec, activeProfile, userQuery]);
+
   const renderStepEditor = (step: RuntimeStep) => {
     const isStepLocked = step.locked || (isLocked && !step.locked);
     
@@ -477,19 +537,20 @@ export default function RuntimeBuilder() {
                 </button>
                 
                 <button
-                  disabled={!activeProfile || isLocked}
+                  onClick={handleRun}
+                  disabled={!activeProfile || isLocked || isRunning}
                   style={{
                     padding: '0.5rem 1rem',
-                    backgroundColor: !activeProfile ? '#cbd5e1' : '#10b981',
+                    backgroundColor: !activeProfile || isRunning ? '#cbd5e1' : '#10b981',
                     color: '#fff',
                     border: 'none',
                     borderRadius: '6px',
                     fontSize: '0.8rem',
                     fontWeight: 600,
-                    cursor: !activeProfile ? 'not-allowed' : 'pointer',
+                    cursor: !activeProfile || isRunning ? 'not-allowed' : 'pointer',
                   }}
                 >
-                  ▶ Run
+                  {isRunning ? '⏳ Running...' : '▶ Run'}
                 </button>
               </div>
             </div>
