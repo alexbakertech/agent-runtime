@@ -10,6 +10,7 @@ import {
   PromptStep,
   ToolStep,
   LoopStep,
+  ContextOutputMode,
 } from './types';
 import { RuntimeEngine } from '../engine';
 import { RuntimeConfig, Override, RequestAssemblyOptions } from '../types';
@@ -120,7 +121,10 @@ export class RuntimeExecutor {
       input,
       transcript,
       overrides,
-      options,
+      options: {
+        ...options,
+        includeThinkingInContext: options.includeThinkingInContext ?? false,
+      },
       accumulatedContext: '',
       toolResults: {},
     };
@@ -219,6 +223,8 @@ export class RuntimeExecutor {
       this.context.input = promptContent + '\n' + this.context.input;
     }
 
+    this.context.options.includeThinkingInContext = step.contextOutputMode === 'all' || step.contextOutputMode === 'thinkingOnly';
+
     const response = await this.runtimeEngine.run(
       this.context.config,
       this.context.input,
@@ -227,12 +233,15 @@ export class RuntimeExecutor {
       this.context.options
     );
 
-    this.context.accumulatedContext += response.content;
+    const contentToInclude = this.determineContextContent(response.content, response.reasoning, step.contextOutputMode, step.includeInContext);
+    if (step.includeInContext) {
+      this.context.accumulatedContext += contentToInclude;
+    }
 
     const stepOutput: StepOutput = {
       stepId: step.id,
       rawOutput: response.content,
-      includedInContext: true,
+      includedInContext: step.includeInContext,
       reasoning: response.reasoning,
     };
     this.executionState.stepOutputs[step.id] = stepOutput;
@@ -243,6 +252,23 @@ export class RuntimeExecutor {
       output: response.content,
       duration: 0,
     };
+  }
+
+  private determineContextContent(content: string, reasoning: string | undefined, mode: ContextOutputMode, includeInContext: boolean): string {
+    if (!includeInContext) return '';
+    
+    switch (mode) {
+      case 'all':
+        return reasoning ? `<thinking>\n${reasoning}\n</thinking>\n\n${content}` : content;
+      case 'responseOnly':
+        return content;
+      case 'thinkingOnly':
+        return reasoning ? `<thinking>\n${reasoning}\n</thinking>` : '';
+      case 'none':
+        return '';
+      default:
+        return content;
+    }
   }
 
   private async executeToolStep(step: ToolStep): Promise<StepResult> {
@@ -265,6 +291,16 @@ export class RuntimeExecutor {
       }
     }
 
+    if (step.toolStepMode === 'present') {
+      const toolInfo = `You have access to the tool: ${step.toolName}. You may use it if needed.`;
+      this.context.input = this.context.input + '\n' + toolInfo;
+    }
+
+    if (step.toolStepMode === 'forceExecute') {
+      const forcePrompt = `You must use the tool "${step.toolName}" to complete this task. Please call it now with appropriate arguments.`;
+      this.context.input = this.context.input + '\n' + forcePrompt;
+    }
+
     if (step.toolStepMode === 'inject' && step.toolRefStepId) {
       const refOutput = this.executionState.stepOutputs[step.toolRefStepId];
       if (refOutput) {
@@ -274,6 +310,8 @@ export class RuntimeExecutor {
       }
     }
 
+    this.context.options.includeThinkingInContext = step.contextOutputMode === 'all' || step.contextOutputMode === 'thinkingOnly';
+
     const response = await this.runtimeEngine.run(
       this.context.config,
       this.context.input,
@@ -282,12 +320,15 @@ export class RuntimeExecutor {
       this.context.options
     );
 
-    this.context.accumulatedContext += response.content;
+    const contentToInclude = this.determineContextContent(response.content, response.reasoning, step.contextOutputMode, step.includeInContext);
+    if (step.includeInContext) {
+      this.context.accumulatedContext += contentToInclude;
+    }
 
     const stepOutput: StepOutput = {
       stepId: step.id,
       rawOutput: response.content,
-      includedInContext: true,
+      includedInContext: step.includeInContext,
       reasoning: response.reasoning,
     };
     this.executionState.stepOutputs[step.id] = stepOutput;
@@ -345,10 +386,15 @@ export class RuntimeExecutor {
 
     const combinedOutput = allOutputs.join('\n---\n');
     
+    if (step.includeInContext) {
+      const contentToInclude = this.determineContextContent(combinedOutput, undefined, step.contextOutputMode, step.includeInContext);
+      this.context.accumulatedContext += contentToInclude;
+    }
+
     const stepOutput: StepOutput = {
       stepId: step.id,
       rawOutput: combinedOutput,
-      includedInContext: true,
+      includedInContext: step.includeInContext,
     };
     this.executionState.stepOutputs[step.id] = stepOutput;
 

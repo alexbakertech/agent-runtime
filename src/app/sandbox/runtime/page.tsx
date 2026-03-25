@@ -31,6 +31,7 @@ export default function RuntimeBuilder() {
   const [executionResults, setExecutionResults] = useState<Record<string, { output?: string; success: boolean; error?: string; duration?: number }>>({});
   const [isRunning, setIsRunning] = useState(false);
   const [currentStepIndex, setCurrentStepIndex] = useState(-1);
+  const [expandedLoops, setExpandedLoops] = useState<Set<string>>(new Set());
   
   const { runtimeSpecs, activeRuntimeSpecId, isLocked } = runtimeSpec;
   
@@ -149,6 +150,32 @@ export default function RuntimeBuilder() {
   
   const handleToggleStepLocked = (stepId: string, locked: boolean) => {
     handleUpdateStep(stepId, { locked });
+  };
+  
+  const handleMoveStep = (stepId: string, direction: 'up' | 'down') => {
+    if (!activeSpec || isLocked) return;
+    
+    const stepIndex = activeSpec.steps.findIndex(s => s.id === stepId);
+    if (stepIndex === -1) return;
+    
+    const newIndex = direction === 'up' ? stepIndex - 1 : stepIndex + 1;
+    if (newIndex < 0 || newIndex >= activeSpec.steps.length) return;
+    
+    const newSteps = [...activeSpec.steps];
+    [newSteps[stepIndex], newSteps[newIndex]] = [newSteps[newIndex], newSteps[stepIndex]];
+    handleUpdateSpec({ steps: newSteps });
+  };
+  
+  const toggleLoopExpanded = (stepId: string) => {
+    setExpandedLoops(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(stepId)) {
+        newSet.delete(stepId);
+      } else {
+        newSet.add(stepId);
+      }
+      return newSet;
+    });
   };
   
   const renderStepEditor = (step: RuntimeStep) => {
@@ -517,7 +544,7 @@ export default function RuntimeBuilder() {
             </div>
             
             <div>
-              {activeSpec.steps.map(renderStepEditor)}
+              {activeSpec.steps.map((step, index) => renderStepEditor(step, index))}
               
               {activeSpec.steps.length === 0 && (
                 <div style={{ textAlign: 'center', padding: '3rem', color: '#94a3b8', border: '2px dashed #e2e8f0', borderRadius: '8px' }}>

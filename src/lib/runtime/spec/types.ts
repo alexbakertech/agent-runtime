@@ -10,6 +10,8 @@ export interface BaseStep {
   type: StepType;
   enabled: boolean;
   locked: boolean;
+  includeInContext: boolean;
+  contextOutputMode: ContextOutputMode;
 }
 
 export interface PromptStep extends BaseStep {
@@ -19,7 +21,9 @@ export interface PromptStep extends BaseStep {
   injectionPosition: 'start' | 'end';
 }
 
-export type ToolStepMode = 'execute' | 'inject' | 'executeAndInject';
+export type ToolStepMode = 'execute' | 'inject' | 'executeAndInject' | 'present' | 'forceExecute';
+
+export type ContextOutputMode = 'all' | 'responseOnly' | 'thinkingOnly' | 'none';
 
 export interface ToolStep extends BaseStep {
   type: 'tool';
@@ -111,6 +115,8 @@ export function createDefaultPromptStep(): PromptStep {
     promptType: 'system',
     content: '',
     injectionPosition: 'start',
+    includeInContext: true,
+    contextOutputMode: 'responseOnly',
   };
 }
 
@@ -126,6 +132,8 @@ export function createDefaultToolStep(): ToolStep {
     autoExecute: true,
     injectionPrompt: 'Here are the tool results:\n{{results}}',
     continueOnFailure: false,
+    includeInContext: true,
+    contextOutputMode: 'responseOnly',
   };
 }
 
@@ -140,6 +148,8 @@ export function createDefaultLoopStep(): LoopStep {
     maxIterations: 5,
     nestedSteps: [],
     continueOnFailure: false,
+    includeInContext: true,
+    contextOutputMode: 'responseOnly',
   };
 }
 
@@ -155,6 +165,8 @@ export function createChatAgentRuntimeSpec(): RuntimeSpec {
     promptType: 'system',
     content: 'You are a helpful AI assistant. Answer concisely.',
     injectionPosition: 'start',
+    includeInContext: true,
+    contextOutputMode: 'responseOnly',
   };
   
   return {
