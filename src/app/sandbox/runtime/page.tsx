@@ -746,7 +746,7 @@ export default function RuntimeBuilder() {
                 </div>
               </div>
               <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: '0.25rem' }}>
-                {spec.blocks.length} block{spec.blocks.length !== 1 ? 's' : ''}
+                {(spec.blocks?.length || 0)} block{(spec.blocks?.length || 0) !== 1 ? 's' : ''}
               </div>
             </div>
           ))}
