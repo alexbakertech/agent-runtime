@@ -1,0 +1,1238 @@
+'use client';
+
+import { useState, useMemo, useRef, useCallback } from 'react';
+import { useRuntimeSpec, useProfiles, useSandbox } from '@/lib/state';
+import {
+  RuntimeSpec,
+  RuntimeStep,
+  PromptStep,
+  ToolStep,
+  LoopStep,
+  ToolStepMode,
+  ContextOutputMode,
+  createSpecId,
+  createDefaultPromptStep,
+  createDefaultToolStep,
+  createDefaultLoopStep,
+} from '@/lib/runtime/spec/types';
+import { RuntimeExecutor } from '@/lib/runtime/spec/executor';
+import { RuntimeConfig, Message } from '@/lib/runtime/types';
+
+const BUILT_IN_TOOLS = [
+  { name: 'get_time', description: 'Returns the current system time' },
+  { name: 'list_files', description: 'Lists files in the sandbox directory' },
+  { name: 'read_file', description: 'Reads file content from sandbox' },
+  { name: 'search_text', description: 'Searches for text in sandbox files' },
+];
+
+export default function RuntimeBuilder() {
+  const { runtimeSpec, updateRuntimeSpec } = useRuntimeSpec();
+  const { profiles, activeProfile, setActiveProfile } = useProfiles();
+  const { sandbox } = useSandbox();
+  
+  const [userQuery, setUserQuery] = useState('');
+  const [selectedProfileId, setSelectedProfileId] = useState<string>('');
+  const [executionResults, setExecutionResults] = useState<Record<string, { output?: string; success: boolean; error?: string; duration?: number; reasoning?: string; includedInContext?: boolean; previousContext?: string; stepContext?: string; sentToNext?: string }>>({});
+  const [isRunning, setIsRunning] = useState(false);
+  const [currentStepIndex, setCurrentStepIndex] = useState(-1);
+  const [expandedLoops, setExpandedLoops] = useState<Set<string>>(new Set());
+  const [expandedOutputs, setExpandedOutputs] = useState<Set<string>>(new Set());
+  const [expandedContexts, setExpandedContexts] = useState<Set<string>>(new Set());
+  const executorRef = useRef<RuntimeExecutor | null>(null);
+  
+  const { runtimeSpecs, activeRuntimeSpecId, isLocked } = runtimeSpec;
+  
+  const [editingSpecName, setEditingSpecName] = useState('');
+  const [editingSpecDescription, setEditingSpecDescription] = useState('');
+  
+  const activeSpec = activeRuntimeSpecId ? runtimeSpecs[activeRuntimeSpecId] : null;
+  
+  const specList = useMemo(() => Object.values(runtimeSpecs), [runtimeSpecs]);
+  
+  const handleCreateSpec = () => {
+    const newSpec: RuntimeSpec = {
+      id: createSpecId(),
+      name: 'New Runtime',
+      description: '',
+      steps: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    
+    updateRuntimeSpec({
+      runtimeSpecs: { ...runtimeSpecs, [newSpec.id]: newSpec },
+      activeRuntimeSpecId: newSpec.id,
+    });
+    
+    setEditingSpecName(newSpec.name);
+    setEditingSpecDescription(newSpec.description);
+  };
+  
+  const handleSelectSpec = (specId: string) => {
+    if (isLocked) return;
+    const spec = runtimeSpecs[specId];
+    if (spec) {
+      updateRuntimeSpec({ activeRuntimeSpecId: specId });
+      setEditingSpecName(spec.name);
+      setEditingSpecDescription(spec.description);
+    }
+  };
+  
+  const handleDeleteSpec = (specId: string) => {
+    if (isLocked) return;
+    const newSpecs = { ...runtimeSpecs };
+    delete newSpecs[specId];
+    
+    updateRuntimeSpec({
+      runtimeSpecs: newSpecs,
+      activeRuntimeSpecId: activeRuntimeSpecId === specId ? null : activeRuntimeSpecId,
+    });
+  };
+  
+  const handleUpdateSpec = (updates: Partial<RuntimeSpec>) => {
+    if (!activeRuntimeSpecId || !activeSpec) return;
+    
+    const updatedSpec = {
+      ...activeSpec,
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    };
+    
+    updateRuntimeSpec({
+      runtimeSpecs: { ...runtimeSpecs, [activeRuntimeSpecId]: updatedSpec },
+    });
+  };
+  
+  const handleAddStep = (type: 'prompt' | 'tool' | 'loop') => {
+    if (!activeSpec || isLocked) return;
+    
+    let newStep: RuntimeStep;
+    switch (type) {
+      case 'prompt':
+        newStep = createDefaultPromptStep();
+        break;
+      case 'tool':
+        newStep = createDefaultToolStep();
+        break;
+      case 'loop':
+        newStep = createDefaultLoopStep();
+        break;
+    }
+    
+    handleUpdateSpec({ steps: [...activeSpec.steps, newStep] });
+  };
+  
+  const handleUpdateStep = (stepId: string, updates: Partial<RuntimeStep>) => {
+    if (!activeSpec || isLocked) return;
+    
+    const steps = activeSpec.steps.map(step =>
+      step.id === stepId ? { ...step, ...updates } as RuntimeStep : step
+    );
+    
+    handleUpdateSpec({ steps });
+  };
+  
+  const handleDeleteStep = (stepId: string) => {
+    if (!activeSpec || isLocked) return;
+    
+    const steps = activeSpec.steps.filter(step => step.id !== stepId);
+    handleUpdateSpec({ steps });
+  };
+  
+  const handleProfileChange = (profileId: string) => {
+    setSelectedProfileId(profileId);
+    setActiveProfile(profileId);
+  };
+
+  const handleToggleLock = () => {
+    updateRuntimeSpec({ isLocked: !isLocked });
+  };
+
+  const customTools = sandbox?.customTools || [];
+  const allTools = [...BUILT_IN_TOOLS, ...customTools.map((t: { name: string; description?: string }) => ({ name: t.name, description: t.description || '' }))];
+  
+  const handleToggleStepEnabled = (stepId: string, enabled: boolean) => {
+    handleUpdateStep(stepId, { enabled });
+  };
+  
+  const handleToggleStepLocked = (stepId: string, locked: boolean) => {
+    handleUpdateStep(stepId, { locked });
+  };
+  
+  const handleMoveStep = (stepId: string, direction: 'up' | 'down') => {
+    if (!activeSpec || isLocked) return;
+    
+    const stepIndex = activeSpec.steps.findIndex(s => s.id === stepId);
+    if (stepIndex === -1) return;
+    
+    const newIndex = direction === 'up' ? stepIndex - 1 : stepIndex + 1;
+    if (newIndex < 0 || newIndex >= activeSpec.steps.length) return;
+    
+    const newSteps = [...activeSpec.steps];
+    [newSteps[stepIndex], newSteps[newIndex]] = [newSteps[newIndex], newSteps[stepIndex]];
+    handleUpdateSpec({ steps: newSteps });
+  };
+  
+  const toggleLoopExpanded = (stepId: string) => {
+    setExpandedLoops(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(stepId)) {
+        newSet.delete(stepId);
+      } else {
+        newSet.add(stepId);
+      }
+      return newSet;
+    });
+  };
+
+  const toggleOutputExpanded = (stepId: string) => {
+    setExpandedOutputs(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(stepId)) {
+        newSet.delete(stepId);
+      } else {
+        newSet.add(stepId);
+      }
+      return newSet;
+    });
+  };
+
+  const toggleContextExpanded = (stepId: string) => {
+    setExpandedContexts(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(stepId)) {
+        newSet.delete(stepId);
+      } else {
+        newSet.add(stepId);
+      }
+      return newSet;
+    });
+  };
+
+  const handleRun = useCallback(async () => {
+    if (!activeSpec || !activeProfile) return;
+
+    const config: RuntimeConfig = {
+      baseUrl: activeProfile.baseUrl,
+      apiKey: activeProfile.apiKey,
+      model: activeProfile.model,
+    };
+
+    if (!executorRef.current) {
+      executorRef.current = new RuntimeExecutor((event) => {
+        if (event.type === 'stepStart') {
+          setCurrentStepIndex(event.stepIndex ?? -1);
+        }
+      });
+    }
+
+    const executor = executorRef.current;
+    await executor.loadSpec(activeSpec);
+
+    setIsRunning(true);
+    setExecutionResults({});
+
+    try {
+      const results = await executor.execute(
+        config,
+        userQuery,
+        [],
+        {},
+        { includeThinkingInContext: false }
+      );
+
+      const stepOutputs = executor.getExecutionState().stepOutputs;
+
+      const formattedResults: Record<string, { output?: string; success: boolean; error?: string; duration?: number; reasoning?: string; includedInContext?: boolean; previousContext?: string; stepContext?: string; sentToNext?: string }> = {};
+      
+      Object.entries(results).forEach(([stepId, result]) => {
+        const stepOutput = stepOutputs[stepId];
+        formattedResults[stepId] = {
+          output: result.output,
+          success: result.success,
+          error: result.error,
+          duration: result.duration,
+          reasoning: stepOutput?.reasoning,
+          includedInContext: stepOutput?.includedInContext,
+          previousContext: stepOutput?.previousContext,
+          stepContext: stepOutput?.stepContext,
+          sentToNext: stepOutput?.sentToNext,
+        };
+      });
+
+      setExecutionResults(formattedResults);
+    } catch (err) {
+      console.error('Execution error:', err);
+    } finally {
+      setIsRunning(false);
+      setCurrentStepIndex(-1);
+    }
+  }, [activeSpec, activeProfile, userQuery]);
+
+  const renderStepEditor = (step: RuntimeStep) => {
+    const isStepLocked = step.locked || (isLocked && !step.locked);
+    
+    return (
+      <div
+        key={step.id}
+        style={{
+          backgroundColor: '#fff',
+          border: '1px solid #e2e8f0',
+          borderRadius: '8px',
+          marginBottom: '0.75rem',
+          overflow: 'hidden',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            padding: '0.75rem 1rem',
+            backgroundColor: step.enabled ? '#f8fafc' : '#f1f5f9',
+            borderBottom: '1px solid #e2e8f0',
+            gap: '0.75rem',
+          }}
+        >
+          <span
+            style={{
+              fontSize: '0.7rem',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              color: step.type === 'prompt' ? '#3b82f6' : step.type === 'tool' ? '#10b981' : '#f59e0b',
+              width: '50px',
+            }}
+          >
+            {step.type}
+          </span>
+          
+          <input
+            type="text"
+            value={step.name}
+            onChange={(e) => !isStepLocked && handleUpdateStep(step.id, { name: e.target.value })}
+            disabled={isStepLocked}
+            style={{
+              flex: 1,
+              border: '1px solid #e2e8f0',
+              borderRadius: '4px',
+              padding: '0.4rem 0.6rem',
+              fontSize: '0.85rem',
+              backgroundColor: '#fff',
+            }}
+          />
+          
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', color: '#64748b' }}>
+            <input
+              type="checkbox"
+              checked={step.enabled}
+              onChange={(e) => !isStepLocked && handleToggleStepEnabled(step.id, e.target.checked)}
+              disabled={isStepLocked}
+            />
+            Enabled
+          </label>
+          
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', color: '#64748b' }}>
+            <input
+              type="checkbox"
+              checked={step.locked}
+              onChange={(e) => handleToggleStepLocked(step.id, e.target.checked)}
+            />
+            Lock
+          </label>
+          
+          <button
+            onClick={() => !isStepLocked && handleDeleteStep(step.id)}
+            disabled={isStepLocked}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: isStepLocked ? '#cbd5e1' : '#ef4444',
+              cursor: isStepLocked ? 'not-allowed' : 'pointer',
+              fontSize: '1rem',
+              padding: '0.25rem',
+            }}
+          >
+            ×
+          </button>
+        </div>
+        
+        <div style={{ padding: '1rem' }}>
+          {step.type === 'prompt' && (
+            <PromptStepEditor
+              step={step}
+              onChange={(updates) => handleUpdateStep(step.id, updates)}
+              disabled={isStepLocked}
+            />
+          )}
+          {step.type === 'tool' && activeSpec && (
+            <ToolStepEditor
+              step={step}
+              steps={activeSpec.steps}
+              onChange={(updates) => handleUpdateStep(step.id, updates)}
+              disabled={isStepLocked}
+            />
+          )}
+          {step.type === 'loop' && (
+            <LoopStepEditor
+              step={step}
+              onChange={(updates) => handleUpdateStep(step.id, updates)}
+              disabled={isStepLocked}
+            />
+          )}
+        </div>
+
+        {executionResults[step.id] && (
+          <>
+            <div style={{ borderTop: '1px solid #e2e8f0' }}>
+              <button
+                onClick={() => toggleOutputExpanded(step.id)}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '0.5rem 1rem',
+                  backgroundColor: '#f0fdf4',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  color: '#166534',
+                }}
+              >
+                <span>▶ OUTPUT</span>
+                <span>{expandedOutputs.has(step.id) ? '▼' : '▶'}</span>
+              </button>
+              {expandedOutputs.has(step.id) && (
+                <div style={{ padding: '0.75rem 1rem', fontSize: '0.8rem', backgroundColor: '#fafafa' }}>
+                  {executionResults[step.id].error ? (
+                    <div style={{ color: '#ef4444', fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
+                      {executionResults[step.id].error}
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ marginBottom: '0.5rem' }}>
+                        <span style={{ fontWeight: 600, color: '#374151' }}>Response:</span>
+                        <div style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', marginTop: '0.25rem', padding: '0.5rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+                          {executionResults[step.id].output || '(no output)'}
+                        </div>
+                      </div>
+                      {executionResults[step.id].reasoning && (
+                        <div style={{ marginTop: '0.5rem' }}>
+                          <span style={{ fontWeight: 600, color: '#92400e' }}>Thinking:</span>
+                          <div style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', marginTop: '0.25rem', padding: '0.5rem', backgroundColor: '#fef3c7', borderRadius: '4px', fontSize: '0.75rem', color: '#78350f' }}>
+                            {executionResults[step.id].reasoning}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div style={{ borderTop: '1px solid #e2e8f0' }}>
+              <button
+                onClick={() => toggleContextExpanded(step.id)}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '0.5rem 1rem',
+                  backgroundColor: executionResults[step.id].includedInContext ? '#dbeafe' : '#f1f5f9',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  color: executionResults[step.id].includedInContext ? '#1e40af' : '#64748b',
+                }}
+              >
+                <span>▶ CONTEXT TO MODEL {executionResults[step.id].includedInContext ? '(SENDING)' : '(NOT SENDING)'}</span>
+                <span>{expandedContexts.has(step.id) ? '▼' : '▶'}</span>
+              </button>
+              {expandedContexts.has(step.id) && (
+                <div style={{ padding: '0.75rem 1rem', fontSize: '0.75rem', backgroundColor: '#fafafa' }}>
+                  {executionResults[step.id].previousContext && (
+                    <div style={{ marginBottom: '0.75rem' }}>
+                      <span style={{ fontWeight: 600, color: '#64748b' }}>Previous Context:</span>
+                      <div style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', marginTop: '0.25rem', padding: '0.5rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0', maxHeight: '100px', overflowY: 'auto', fontSize: '0.7rem' }}>
+                        {executionResults[step.id].previousContext}
+                      </div>
+                    </div>
+                  )}
+                  {executionResults[step.id].stepContext && (
+                    <div style={{ marginBottom: '0.75rem' }}>
+                      <span style={{ fontWeight: 600, color: '#64748b' }}>Step Context:</span>
+                      <div style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', marginTop: '0.25rem', padding: '0.5rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '0.7rem' }}>
+                        {executionResults[step.id].stepContext}
+                      </div>
+                    </div>
+                  )}
+                  {executionResults[step.id].sentToNext && (
+                    <div style={{ marginBottom: '0.5rem' }}>
+                      <span style={{ fontWeight: 600, color: executionResults[step.id].includedInContext ? '#166534' : '#94a3b8' }}>Sent to Next Step:</span>
+                      <div style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', marginTop: '0.25rem', padding: '0.5rem', backgroundColor: executionResults[step.id].includedInContext ? '#dcfce7' : '#f1f5f9', borderRadius: '4px', border: `1px solid ${executionResults[step.id].includedInContext ? '#86efac' : '#e2e8f0'}`, maxHeight: '100px', overflowY: 'auto', fontSize: '0.7rem' }}>
+                        {executionResults[step.id].sentToNext}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
+  
+  return (
+    <div style={{ display: 'flex', height: 'calc(100vh - 60px)', fontFamily: 'system-ui', color: '#1a1a1a', backgroundColor: '#fdfdfd' }}>
+      <aside style={{ width: '260px', backgroundColor: '#f8fafc', borderRight: '1px solid #e2e8f0', padding: '1rem', overflowY: 'auto' }}>
+        <div style={{ marginBottom: '1.5rem' }}>
+          <h2 style={{ fontSize: '0.8rem', fontWeight: 700, color: '#64748b', marginBottom: '0.75rem' }}>
+            RUNTIME SPECS
+          </h2>
+          
+          <button
+            onClick={handleCreateSpec}
+            style={{
+              width: '100%',
+              padding: '0.6rem',
+              backgroundColor: '#3b82f6',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '6px',
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            + New Runtime
+          </button>
+        </div>
+        
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          {specList.map((spec) => (
+            <div
+              key={spec.id}
+              onClick={() => handleSelectSpec(spec.id)}
+              style={{
+                padding: '0.75rem',
+                backgroundColor: activeRuntimeSpecId === spec.id ? '#fff' : '#fff',
+                border: activeRuntimeSpecId === spec.id ? '2px solid #3b82f6' : '1px solid #e2e8f0',
+                borderRadius: '6px',
+                cursor: isLocked ? 'not-allowed' : 'pointer',
+                opacity: isLocked ? 0.6 : 1,
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{spec.name}</span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleDeleteSpec(spec.id); }}
+                  disabled={isLocked}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#94a3b8',
+                    cursor: isLocked ? 'not-allowed' : 'pointer',
+                    fontSize: '1rem',
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+              <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: '0.25rem' }}>
+                {spec.steps.length} step{spec.steps.length !== 1 ? 's' : ''}
+              </div>
+            </div>
+          ))}
+          
+          {specList.length === 0 && (
+            <div style={{ textAlign: 'center', padding: '2rem 1rem', color: '#94a3b8', fontSize: '0.8rem' }}>
+              No runtime specs yet.<br />Create one to get started.
+            </div>
+          )}
+        </div>
+      </aside>
+      
+      <main style={{ flex: 1, padding: '1.5rem', overflowY: 'auto' }}>
+        <div style={{ marginBottom: '1.5rem', padding: '1rem', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+          <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
+                Profile
+              </label>
+              <select
+                value={selectedProfileId || activeProfile?.id || ''}
+                onChange={(e) => handleProfileChange(e.target.value)}
+                disabled={isLocked}
+                style={{
+                  width: '100%',
+                  padding: '0.5rem',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '4px',
+                  fontSize: '0.85rem',
+                  backgroundColor: '#fff',
+                }}
+              >
+                <option value="">Select a profile...</option>
+                {Object.values(profiles).map((profile) => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          
+          <div>
+            <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
+              User Query
+            </label>
+            <textarea
+              value={userQuery}
+              onChange={(e) => setUserQuery(e.target.value)}
+              disabled={isLocked}
+              rows={2}
+              placeholder="Enter your query or instructions..."
+              style={{
+                width: '100%',
+                padding: '0.5rem',
+                border: '1px solid #e2e8f0',
+                borderRadius: '4px',
+                fontSize: '0.85rem',
+                fontFamily: 'inherit',
+                resize: 'vertical',
+                backgroundColor: '#fff',
+              }}
+            />
+          </div>
+        </div>
+
+        {activeSpec ? (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem' }}>
+              <div style={{ flex: 1 }}>
+                <input
+                  type="text"
+                  value={editingSpecName}
+                  onChange={(e) => setEditingSpecName(e.target.value)}
+                  onBlur={() => handleUpdateSpec({ name: editingSpecName })}
+                  disabled={isLocked}
+                  placeholder="Runtime name"
+                  style={{
+                    fontSize: '1.25rem',
+                    fontWeight: 700,
+                    border: 'none',
+                    borderBottom: isLocked ? 'none' : '2px solid transparent',
+                    backgroundColor: 'transparent',
+                    padding: '0.25rem 0',
+                    width: '100%',
+                    marginBottom: '0.5rem',
+                  }}
+                />
+                <input
+                  type="text"
+                  value={editingSpecDescription}
+                  onChange={(e) => setEditingSpecDescription(e.target.value)}
+                  onBlur={() => handleUpdateSpec({ description: editingSpecDescription })}
+                  disabled={isLocked}
+                  placeholder="Description (optional)"
+                  style={{
+                    fontSize: '0.85rem',
+                    color: '#64748b',
+                    border: 'none',
+                    borderBottom: isLocked ? 'none' : '1px solid #e2e8f0',
+                    backgroundColor: 'transparent',
+                    padding: '0.25rem 0',
+                    width: '100%',
+                  }}
+                />
+              </div>
+              
+              <div style={{ display: 'flex', gap: '0.5rem', marginLeft: '1rem' }}>
+                <button
+                  onClick={handleToggleLock}
+                  style={{
+                    padding: '0.5rem 1rem',
+                    backgroundColor: isLocked ? '#ef4444' : '#64748b',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {isLocked ? '🔒 Locked' : '🔓 Unlocked'}
+                </button>
+                
+                <button
+                  onClick={handleRun}
+                  disabled={!activeProfile || isLocked || isRunning}
+                  style={{
+                    padding: '0.5rem 1rem',
+                    backgroundColor: !activeProfile || isRunning ? '#cbd5e1' : '#10b981',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                    cursor: !activeProfile || isRunning ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {isRunning ? '⏳ Running...' : '▶ Run'}
+                </button>
+              </div>
+            </div>
+            
+            <div style={{ marginBottom: '1rem' }}>
+              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b' }}>Add Step:</span>
+                <button
+                  onClick={() => handleAddStep('prompt')}
+                  disabled={isLocked}
+                  style={{
+                    padding: '0.25rem 0.75rem',
+                    backgroundColor: '#3b82f620',
+                    color: '#3b82f6',
+                    border: '1px solid #3b82f640',
+                    borderRadius: '4px',
+                    fontSize: '0.75rem',
+                    cursor: isLocked ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  + Prompt
+                </button>
+                <button
+                  onClick={() => handleAddStep('tool')}
+                  disabled={isLocked}
+                  style={{
+                    padding: '0.25rem 0.75rem',
+                    backgroundColor: '#10b98120',
+                    color: '#10b981',
+                    border: '1px solid #10b98140',
+                    borderRadius: '4px',
+                    fontSize: '0.75rem',
+                    cursor: isLocked ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  + Tool
+                </button>
+                <button
+                  onClick={() => handleAddStep('loop')}
+                  disabled={isLocked}
+                  style={{
+                    padding: '0.25rem 0.75rem',
+                    backgroundColor: '#f59e0b20',
+                    color: '#f59e0b',
+                    border: '1px solid #f59e0b40',
+                    borderRadius: '4px',
+                    fontSize: '0.75rem',
+                    cursor: isLocked ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  + Loop
+                </button>
+              </div>
+            </div>
+            
+            <div>
+              {activeSpec.steps.map((step) => renderStepEditor(step))}
+              
+              {activeSpec.steps.length === 0 && (
+                <div style={{ textAlign: 'center', padding: '3rem', color: '#94a3b8', border: '2px dashed #e2e8f0', borderRadius: '8px' }}>
+                  No steps yet. Add a step to start building your runtime.
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <div style={{ textAlign: 'center', padding: '4rem 2rem', color: '#64748b' }}>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '0.5rem' }}>Select or create a runtime</h2>
+            <p style={{ fontSize: '0.9rem' }}>Choose a runtime spec from the sidebar or create a new one to get started.</p>
+          </div>
+        )}
+      </main>
+      
+      <aside style={{ width: '320px', backgroundColor: '#fafafa', borderLeft: '1px solid #e2e8f0', padding: '1rem', overflowY: 'auto' }}>
+        <h3 style={{ fontSize: '0.8rem', fontWeight: 700, color: '#64748b', marginBottom: '1rem' }}>
+          OUTPUT
+        </h3>
+        
+        {isRunning && (
+          <div style={{ padding: '1rem', backgroundColor: '#fef3c7', borderRadius: '6px', marginBottom: '1rem', fontSize: '0.8rem', color: '#92400e' }}>
+            Running step {currentStepIndex + 1}...
+          </div>
+        )}
+        
+        {Object.keys(executionResults).length === 0 && !isRunning && (
+          <div style={{ textAlign: 'center', padding: '2rem 1rem', color: '#94a3b8', fontSize: '0.8rem' }}>
+            Outputs appear inline with each step above.
+          </div>
+        )}
+        
+        {Object.keys(executionResults).length > 0 && (
+          <div
+            style={{
+              backgroundColor: '#f0fdf4',
+              border: '1px solid #86efac',
+              borderRadius: '6px',
+              padding: '0.75rem',
+              marginTop: '0.5rem',
+            }}
+          >
+            <div style={{ fontSize: '0.7rem', fontWeight: 600, color: '#166534', marginBottom: '0.25rem' }}>
+              EXECUTION COMPLETE
+            </div>
+            <div style={{ fontSize: '0.75rem', color: '#15803d' }}>
+              {Object.keys(executionResults).length} steps executed
+            </div>
+          </div>
+        )}
+      </aside>
+    </div>
+  );
+}
+
+function PromptStepEditor({ step, onChange, disabled }: { step: PromptStep; onChange: (updates: Partial<PromptStep>) => void; disabled: boolean }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+      <div style={{ display: 'flex', gap: '1rem' }}>
+        <div style={{ flex: 1 }}>
+          <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
+            Prompt Type
+          </label>
+          <select
+            value={step.promptType}
+            onChange={(e) => onChange({ promptType: e.target.value as 'system' | 'user' | 'hidden' })}
+            disabled={disabled}
+            style={{
+              width: '100%',
+              padding: '0.4rem',
+              border: '1px solid #e2e8f0',
+              borderRadius: '4px',
+              fontSize: '0.8rem',
+              backgroundColor: '#fff',
+            }}
+          >
+            <option value="system">System</option>
+            <option value="user">User</option>
+            <option value="hidden">Hidden</option>
+          </select>
+        </div>
+        
+        <div style={{ flex: 1 }}>
+          <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
+            Position
+          </label>
+          <select
+            value={step.injectionPosition}
+            onChange={(e) => onChange({ injectionPosition: e.target.value as 'start' | 'end' })}
+            disabled={disabled}
+            style={{
+              width: '100%',
+              padding: '0.4rem',
+              border: '1px solid #e2e8f0',
+              borderRadius: '4px',
+              fontSize: '0.8rem',
+              backgroundColor: '#fff',
+            }}
+          >
+            <option value="start">Start</option>
+            <option value="end">End</option>
+          </select>
+        </div>
+      </div>
+      
+      <div>
+        <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
+          Prompt Content
+        </label>
+        <textarea
+          value={step.content}
+          onChange={(e) => onChange({ content: e.target.value })}
+          disabled={disabled}
+          rows={3}
+          placeholder="Enter prompt content..."
+          style={{
+            width: '100%',
+            padding: '0.5rem',
+            border: '1px solid #e2e8f0',
+            borderRadius: '4px',
+            fontSize: '0.8rem',
+            fontFamily: 'monospace',
+            resize: 'vertical',
+            backgroundColor: '#fff',
+          }}
+        />
+      </div>
+
+      <div style={{ marginTop: '0.5rem', padding: '0.75rem', backgroundColor: '#f8fafc', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', marginBottom: '0.5rem' }}>
+          Context Output
+        </div>
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem' }}>
+            <input
+              type="checkbox"
+              checked={step.includeInContext ?? true}
+              onChange={(e) => onChange({ includeInContext: e.target.checked })}
+              disabled={disabled}
+            />
+            Include in Context
+          </label>
+          <select
+            value={step.contextOutputMode || 'responseOnly'}
+            onChange={(e) => onChange({ contextOutputMode: e.target.value as ContextOutputMode })}
+            disabled={disabled}
+            style={{
+              padding: '0.25rem 0.5rem',
+              border: '1px solid #e2e8f0',
+              borderRadius: '4px',
+              fontSize: '0.75rem',
+              backgroundColor: '#fff',
+            }}
+          >
+            <option value="responseOnly">Response Only</option>
+            <option value="all">All (Response + Thinking)</option>
+            <option value="thinkingOnly">Thinking Only</option>
+            <option value="none">None</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ToolStepEditor({ step, steps, onChange, disabled }: { step: ToolStep; steps: RuntimeStep[]; onChange: (updates: Partial<ToolStep>) => void; disabled: boolean }) {
+  const customTools = [] as { name: string; description?: string }[];
+  const allTools = [...BUILT_IN_TOOLS, ...customTools];
+  const isCustomTool = step.toolName && !BUILT_IN_TOOLS.find(t => t.name === step.toolName);
+  
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+      <div>
+        <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
+          Tool
+        </label>
+        <select
+          value={isCustomTool ? 'custom' : step.toolName}
+          onChange={(e) => onChange({ toolName: e.target.value === 'custom' ? '' : e.target.value })}
+          disabled={disabled}
+          style={{
+            width: '100%',
+            padding: '0.4rem',
+            border: '1px solid #e2e8f0',
+            borderRadius: '4px',
+            fontSize: '0.8rem',
+            backgroundColor: '#fff',
+          }}
+        >
+          <option value="">Select a tool...</option>
+          <optgroup label="Built-in Tools">
+            {BUILT_IN_TOOLS.map((tool) => (
+              <option key={tool.name} value={tool.name}>
+                {tool.name} - {tool.description}
+              </option>
+            ))}
+          </optgroup>
+        </select>
+      </div>
+      
+      {isCustomTool && (
+        <div>
+          <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
+            Custom Tool Name
+          </label>
+          <input
+            type="text"
+            value={step.toolName}
+            onChange={(e) => onChange({ toolName: e.target.value })}
+            disabled={disabled}
+            placeholder="Enter custom tool name..."
+            style={{
+              width: '100%',
+              padding: '0.4rem',
+              border: '1px solid #e2e8f0',
+              borderRadius: '4px',
+              fontSize: '0.8rem',
+              backgroundColor: '#fff',
+            }}
+          />
+        </div>
+      )}
+      
+      <div style={{ display: 'flex', gap: '1rem' }}>
+        <div style={{ flex: 1 }}>
+          <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
+            Mode
+          </label>
+          <select
+            value={step.toolStepMode || 'execute'}
+            onChange={(e) => onChange({ toolStepMode: e.target.value as ToolStepMode })}
+            disabled={disabled}
+            style={{
+              width: '100%',
+              padding: '0.4rem',
+              border: '1px solid #e2e8f0',
+              borderRadius: '4px',
+              fontSize: '0.8rem',
+              backgroundColor: '#fff',
+            }}
+          >
+            <option value="execute">Execute</option>
+            <option value="executeAndInject">Execute & Inject</option>
+            <option value="inject">Inject from Step</option>
+            <option value="present">Present to Model</option>
+            <option value="forceExecute">Force Tool Call</option>
+          </select>
+        </div>
+        
+        <div style={{ flex: 1 }}>
+          <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
+            Auto-execute
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem' }}>
+            <input
+              type="checkbox"
+              checked={step.autoExecute}
+              onChange={(e) => onChange({ autoExecute: e.target.checked })}
+              disabled={disabled}
+            />
+            Enable
+          </label>
+        </div>
+        
+        <div style={{ flex: 1 }}>
+          <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
+            Continue on failure
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem' }}>
+            <input
+              type="checkbox"
+              checked={step.continueOnFailure}
+              onChange={(e) => onChange({ continueOnFailure: e.target.checked })}
+              disabled={disabled}
+            />
+            Enable
+          </label>
+        </div>
+      </div>
+      
+      {step.toolStepMode === 'inject' && (
+        <div>
+          <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
+            Reference Step
+          </label>
+          <select
+            value={step.toolRefStepId || ''}
+            onChange={(e) => onChange({ toolRefStepId: e.target.value })}
+            disabled={disabled}
+            style={{
+              width: '100%',
+              padding: '0.4rem',
+              border: '1px solid #e2e8f0',
+              borderRadius: '4px',
+              fontSize: '0.8rem',
+              backgroundColor: '#fff',
+            }}
+          >
+            <option value="">Select a step...</option>
+            {steps.filter(s => s.id !== step.id).map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name || s.type} ({s.type})
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      
+      {(step.toolStepMode === 'executeAndInject' || step.toolStepMode === 'inject') && (
+        <div>
+          <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
+            Injection Prompt
+          </label>
+          <textarea
+            value={step.injectionPrompt}
+            onChange={(e) => onChange({ injectionPrompt: e.target.value })}
+            disabled={disabled}
+            rows={2}
+            placeholder="Use {{results}} to inject tool results..."
+            style={{
+              width: '100%',
+              padding: '0.5rem',
+              border: '1px solid #e2e8f0',
+              borderRadius: '4px',
+              fontSize: '0.8rem',
+              fontFamily: 'monospace',
+              resize: 'vertical',
+              backgroundColor: '#fff',
+            }}
+          />
+        </div>
+      )}
+
+      <div style={{ marginTop: '0.5rem', padding: '0.75rem', backgroundColor: '#f8fafc', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', marginBottom: '0.5rem' }}>
+          Context Output
+        </div>
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem' }}>
+            <input
+              type="checkbox"
+              checked={step.includeInContext ?? true}
+              onChange={(e) => onChange({ includeInContext: e.target.checked })}
+              disabled={disabled}
+            />
+            Include in Context
+          </label>
+          <select
+            value={step.contextOutputMode || 'responseOnly'}
+            onChange={(e) => onChange({ contextOutputMode: e.target.value as ContextOutputMode })}
+            disabled={disabled}
+            style={{
+              padding: '0.25rem 0.5rem',
+              border: '1px solid #e2e8f0',
+              borderRadius: '4px',
+              fontSize: '0.75rem',
+              backgroundColor: '#fff',
+            }}
+          >
+            <option value="responseOnly">Response Only</option>
+            <option value="all">All (Response + Thinking)</option>
+            <option value="thinkingOnly">Thinking Only</option>
+            <option value="none">None</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LoopStepEditor({ step, onChange, disabled }: { step: LoopStep; onChange: (updates: Partial<LoopStep>) => void; disabled: boolean }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+      <div style={{ display: 'flex', gap: '1rem' }}>
+        <div style={{ flex: 1 }}>
+          <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
+            Condition
+          </label>
+          <select
+            value={step.condition}
+            onChange={(e) => onChange({ condition: e.target.value as 'maxIterations' | 'untilUserInput' | 'untilToolSucceeds' })}
+            disabled={disabled}
+            style={{
+              width: '100%',
+              padding: '0.4rem',
+              border: '1px solid #e2e8f0',
+              borderRadius: '4px',
+              fontSize: '0.8rem',
+              backgroundColor: '#fff',
+            }}
+          >
+            <option value="maxIterations">Max Iterations</option>
+            <option value="untilUserInput">Until User Input</option>
+            <option value="untilToolSucceeds">Until Tool Succeeds</option>
+          </select>
+        </div>
+        
+        {step.condition === 'maxIterations' && (
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
+              Max Iterations
+            </label>
+            <input
+              type="number"
+              value={step.maxIterations}
+              onChange={(e) => onChange({ maxIterations: parseInt(e.target.value) || 1 })}
+              disabled={disabled}
+              min={1}
+              style={{
+                width: '100%',
+                padding: '0.4rem',
+                border: '1px solid #e2e8f0',
+                borderRadius: '4px',
+                fontSize: '0.8rem',
+                backgroundColor: '#fff',
+              }}
+            />
+          </div>
+        )}
+        
+        {step.condition === 'untilToolSucceeds' && (
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
+              Tool Name
+            </label>
+            <input
+              type="text"
+              value={step.toolName || ''}
+              onChange={(e) => onChange({ toolName: e.target.value })}
+              disabled={disabled}
+              placeholder="Tool to watch..."
+              style={{
+                width: '100%',
+                padding: '0.4rem',
+                border: '1px solid #e2e8f0',
+                borderRadius: '4px',
+                fontSize: '0.8rem',
+                backgroundColor: '#fff',
+              }}
+            />
+          </div>
+        )}
+      </div>
+      
+      <div style={{ display: 'flex', gap: '1rem' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem' }}>
+          <input
+            type="checkbox"
+            checked={step.continueOnFailure}
+            onChange={(e) => onChange({ continueOnFailure: e.target.checked })}
+            disabled={disabled}
+          />
+          Continue on failure
+        </label>
+      </div>
+
+      <div style={{ marginTop: '0.5rem', padding: '0.75rem', backgroundColor: '#f8fafc', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', marginBottom: '0.5rem' }}>
+          Context Output
+        </div>
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem' }}>
+            <input
+              type="checkbox"
+              checked={step.includeInContext ?? true}
+              onChange={(e) => onChange({ includeInContext: e.target.checked })}
+              disabled={disabled}
+            />
+            Include in Context
+          </label>
+          <select
+            value={step.contextOutputMode || 'responseOnly'}
+            onChange={(e) => onChange({ contextOutputMode: e.target.value as ContextOutputMode })}
+            disabled={disabled}
+            style={{
+              padding: '0.25rem 0.5rem',
+              border: '1px solid #e2e8f0',
+              borderRadius: '4px',
+              fontSize: '0.75rem',
+              backgroundColor: '#fff',
+            }}
+          >
+            <option value="responseOnly">Response Only</option>
+            <option value="all">All (Response + Thinking)</option>
+            <option value="thinkingOnly">Thinking Only</option>
+            <option value="none">None</option>
+          </select>
+        </div>
+      </div>
+      
+      <div style={{ fontSize: '0.75rem', color: '#64748b', padding: '0.5rem', backgroundColor: '#f8fafc', borderRadius: '4px' }}>
+        Nested steps: {step.nestedSteps.length} (not editable in v1)
+      </div>
+    </div>
+  );
+}

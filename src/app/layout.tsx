@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import Link from 'next/link';
+import { StateProvider } from '@/lib/state';
 
 export const metadata: Metadata = {
   title: "Agent Runtime",
@@ -38,17 +39,25 @@ export default function RootLayout({
           <Link href="/" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
             Home
           </Link>
-          <Link href="/context-engine" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
-            Context Engine
+          <Link href="/chat-agent" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
+            Chat Agent
           </Link>
           <Link href="/sandbox/tools" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
             Tools Sandbox
           </Link>
+          <Link href="/sandbox/runtime" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
+            Runtime Builder
+          </Link>
           <Link href="/configure" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
             Configure & Test
           </Link>
+          <Link href="/export" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
+            State
+          </Link>
         </nav>
-        {children}
+        <StateProvider>
+          {children}
+        </StateProvider>
       </body>
     </html>
   );

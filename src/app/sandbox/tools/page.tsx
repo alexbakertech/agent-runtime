@@ -1,7 +1,9 @@
 'use client';
 
-import { useState, useEffect, useRef, DragEvent } from 'react';
+import { useState, useEffect, useRef, useCallback, DragEvent } from 'react';
+import { useSandbox, CustomTool } from '@/lib/state';
 import { toolDefinitions } from '@/lib/tools/definitions';
+import { generateUUID } from '@/lib/state/defaults';
 import { 
   listFiles, 
   deleteFile, 
@@ -156,7 +158,15 @@ async function getFilesFromDataTransfer(items: DataTransferItemList, basePath: s
 }
 
 export default function ToolsSandbox() {
-  const [selectedToolId, setSelectedToolId] = useState<string | null>(null);
+  const { sandbox, updateSandbox } = useSandbox();
+  const {
+    selectedToolId,
+    expandedTools,
+    builtInToolsExpanded,
+    userToolsExpanded,
+    customTools = []
+  } = sandbox;
+
   const [sandboxFiles, setSandboxFiles] = useState<FileEntry[]>([]);
   const [isRefreshingFiles, setIsRefreshingFiles] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -168,19 +178,37 @@ export default function ToolsSandbox() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
 
+  // Built-in tool definitions (excludes custom_tool)
+  const builtInToolDefs = toolDefinitions.filter(def => def.name !== 'custom_tool');
+
+  // Local state for sandbox (not persisted - tool code, invocation args, trace)
   const [toolDrafts, setToolDrafts] = useState<Record<string, ToolDraft>>(() => {
     const initialDrafts: Record<string, ToolDraft> = {};
-    toolDefinitions.forEach(def => {
+    builtInToolDefs.forEach(def => {
       initialDrafts[def.name] = {
         name: def.name,
         description: def.description,
         schemaText: JSON.stringify(def.parameters, null, 2),
         enabled: true,
-        code: TOOL_DEFAULT_CODE[def.name] || TOOL_DEFAULT_CODE.custom_tool
+        code: TOOL_DEFAULT_CODE[def.name] || ''
       };
     });
     return initialDrafts;
   });
+
+  // Local state for selected tool
+  const [localSelectedToolId, setLocalSelectedToolId] = useState<string | null>(selectedToolId);
+
+  // Sync local selectedToolId with context
+  useEffect(() => {
+    setLocalSelectedToolId(selectedToolId);
+  }, [selectedToolId]);
+
+  // Helper to update selected tool
+  const setSelectedToolId = (id: string | null) => {
+    setLocalSelectedToolId(id);
+    updateSandbox({ selectedToolId: id });
+  };
 
   const refreshSandboxFiles = async () => {
     setIsRefreshingFiles(true);
@@ -206,7 +234,7 @@ export default function ToolsSandbox() {
 
   const [invocationDrafts, setInvocationDrafts] = useState<Record<string, ToolInvocationDraft>>(() => {
     const initialInvocations: Record<string, ToolInvocationDraft> = {};
-    toolDefinitions.forEach(def => {
+    builtInToolDefs.forEach(def => {
       initialInvocations[def.name] = {
         argsText: "{}",
       };
@@ -223,9 +251,21 @@ export default function ToolsSandbox() {
   const [trace, setTrace] = useState<ToolTraceEntry[]>([]);
   const [expandedTraceIds, setExpandedTraceIds] = useState<Set<string>>(new Set());
   const [lastValidation, setLastValidation] = useState<Record<string, { ok: boolean, errors: string[] }>>({});
+  
+  // Local state for custom tool invocation (keyed by custom tool id)
+  const [customInvocationDrafts, setCustomInvocationDrafts] = useState<Record<string, ToolInvocationDraft>>({});
 
-  const selectedTool = selectedToolId ? toolDrafts[selectedToolId] : null;
-  const selectedInvocation = selectedToolId ? invocationDrafts[selectedToolId] : null;
+  const selectedTool = localSelectedToolId ? toolDrafts[localSelectedToolId] : null;
+  const selectedCustomTool = customTools.find(t => t.id === localSelectedToolId) || null;
+  const selectedInvocation = selectedTool ? (localSelectedToolId ? invocationDrafts[localSelectedToolId] : null) : null;
+  const selectedCustomInvocation = selectedCustomTool ? (customInvocationDrafts[selectedCustomTool.id] || { argsText: "{}" }) : { argsText: "{}" };
+
+  const updateCustomInvocationDraft = (id: string, updates: Partial<ToolInvocationDraft>) => {
+    setCustomInvocationDrafts(prev => ({
+      ...prev,
+      [id]: { ...prev[id], ...updates, id }
+    }));
+  };
 
   const updateToolDraft = (id: string, updates: Partial<ToolDraft>) => {
     setToolDrafts(prev => ({
@@ -284,6 +324,172 @@ export default function ToolsSandbox() {
     const result = validateArgs(toolId);
     setLastValidation(prev => ({ ...prev, [toolId]: { ok: result.ok, errors: result.errors } }));
   };
+
+  const validateCustomTool = (tool: CustomTool, argsText: string) => {
+    let errors: string[] = [];
+    let parsedArgs: any = null;
+
+    try {
+      parsedArgs = JSON.parse(argsText);
+      const params = tool.parameters as { required?: string[] };
+      if (params.required) {
+        params.required.forEach((req: string) => {
+          if (!(req in parsedArgs)) {
+            errors.push(`Missing required parameter: ${req}`);
+          }
+        });
+      }
+    } catch (e: any) {
+      errors.push(`JSON Parse Error: ${e.message}`);
+    }
+
+    return { ok: errors.length === 0, errors, parsedArgs };
+  };
+
+  const handleCustomValidate = () => {
+    if (!selectedCustomTool) return;
+    const result = validateCustomTool(selectedCustomTool, selectedCustomInvocation.argsText);
+    setLastValidation(prev => ({ ...prev, [selectedCustomTool.id]: { ok: result.ok, errors: result.errors } }));
+  };
+
+  const handleCustomExecute = async () => {
+    if (!selectedCustomTool || !selectedCustomInvocation) return;
+    
+    const invocation = selectedCustomInvocation;
+    const steps: ExecutionStep[] = [];
+    const addStep = (label: string, status: 'info' | 'success' | 'error', details?: string) => {
+      steps.push({ label, status, details, timestamp: new Date().toLocaleTimeString() });
+    };
+
+    const pipelineState: ExecutionPipelineState = {
+      rawArgsText: invocation.argsText,
+      validation: { ok: true, errors: [] },
+      active: true
+    };
+
+    addStep("Initializing custom tool execution", "info");
+    addStep("Capturing raw input", "info");
+    addStep("Parsing arguments JSON", "info");
+
+    let parseError: string | null = null;
+    let parsedArgs: any = null;
+
+    try {
+      parsedArgs = JSON.parse(invocation.argsText);
+    } catch (e: any) {
+      parseError = e.message;
+      addStep("JSON Parse Error", "error", e.message);
+    }
+
+    const { ok, errors } = validateCustomTool(selectedCustomTool, invocation.argsText);
+    pipelineState.validation = { ok, errors };
+    if (!ok) {
+      addStep("Argument validation failed", "error", errors.join(", "));
+    } else {
+      addStep("Argument validation successful", "success");
+    }
+
+    const entryId = Math.random().toString(36).substring(7);
+    const timestamp = new Date().toLocaleTimeString();
+
+    let result = null;
+    let error = null;
+
+    if (parseError || !ok) {
+      error = parseError || "Validation failed.";
+    } else {
+      addStep("Executing client action", "info");
+      try {
+        const helpers = {
+          now: () => new Date().toISOString(),
+          sleep: (ms: number) => new Promise(r => setTimeout(r, ms)),
+          log: (msg: string) => addStep(`[Action Log] ${msg}`, "info"),
+          listFiles: async (dirPath: string) => {
+            const files = await listFiles(dirPath);
+            return files.map(f => ({ name: f.name, type: f.type }));
+          },
+          readFile: async (filePath: string) => {
+            const file = await readFile(filePath);
+            if (!file) throw new Error('File not found');
+            return { name: file.name, content: file.content };
+          },
+          searchFiles: async (pattern: string, dirPath: string = ".") => {
+            return searchInFiles(pattern, { dirPath });
+          }
+        };
+
+        const runner = new Function('args', 'helpers', `
+          ${selectedCustomTool.code}
+          return run({ args, helpers });
+        `);
+        result = await runner(parsedArgs, helpers);
+        addStep("Execution complete", "success");
+      } catch (e: any) {
+        addStep("Runtime error", "error", e.message);
+        error = e.message;
+      }
+    }
+
+    pipelineState.result = result;
+    pipelineState.error = error;
+    setPipeline(pipelineState);
+
+    addStep("Cycle complete", error ? "error" : "success");
+
+    const newEntry: ToolTraceEntry = {
+      id: entryId,
+      timestamp,
+      toolName: selectedCustomTool.name,
+      argsText: invocation.argsText,
+      parsedArgs,
+      validation: { ok, errors },
+      result,
+      error,
+      steps
+    };
+
+    setTrace(prev => [newEntry, ...prev]);
+    setExpandedTraceIds(prev => new Set(prev).add(entryId));
+  };
+
+  // Custom tool handlers
+  const addCustomTool = useCallback(() => {
+    const newTool: CustomTool = {
+      id: generateUUID(),
+      name: `custom_tool_${customTools.length + 1}`,
+      description: 'A custom tool defined by the user.',
+      parameters: { type: 'object', properties: {} },
+      code: `async function run({ args, helpers }) {
+  const { log } = helpers;
+  log("Running custom tool...");
+  return { status: "success" };
+}`,
+      enabled: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    updateSandbox({ customTools: [...customTools, newTool] });
+  }, [customTools, updateSandbox]);
+
+  const updateCustomTool = useCallback((id: string, updates: Partial<CustomTool>) => {
+    updateSandbox({
+      customTools: customTools.map(tool =>
+        tool.id === id ? { ...tool, ...updates, updatedAt: new Date().toISOString() } : tool
+      )
+    });
+  }, [customTools, updateSandbox]);
+
+  const deleteCustomTool = useCallback((id: string) => {
+    updateSandbox({ customTools: customTools.filter(tool => tool.id !== id) });
+  }, [customTools, updateSandbox]);
+
+  const toggleBuiltInTools = useCallback(() => {
+    updateSandbox({ builtInToolsExpanded: !builtInToolsExpanded });
+  }, [builtInToolsExpanded, updateSandbox]);
+
+  const toggleUserTools = useCallback(() => {
+    updateSandbox({ userToolsExpanded: !userToolsExpanded });
+  }, [userToolsExpanded, updateSandbox]);
 
   const handleExecute = async (toolId: string) => {
     const draft = toolDrafts[toolId];
@@ -523,30 +729,90 @@ export default function ToolsSandbox() {
       {/* LEFT PANEL - TOOL REGISTRY & SANDBOX FILES */}
       <aside style={{ width: '320px', borderRight: '1px solid #e2e8f0', backgroundColor: '#fff', display: 'flex', flexDirection: 'column' }}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', borderBottom: '1px solid #e2e8f0', overflow: 'hidden' }}>
-          <div style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0' }}>
+          <div style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800 }}>TOOLS</h2>
+            <button 
+              onClick={addCustomTool}
+              style={{ fontSize: '0.65rem', padding: '0.25rem 0.5rem', backgroundColor: '#3b82f6', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}
+            >
+              + Add Custom
+            </button>
           </div>
           <div style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {toolDefinitions.map(def => {
-                const isSelected = selectedToolId === def.name;
-                return (
-                  <div 
-                    key={def.name}
-                    onClick={() => setSelectedToolId(def.name)}
-                    style={{ 
-                      padding: '0.75rem', 
-                      borderRadius: '8px', 
-                      border: `1px solid ${isSelected ? '#3b82f6' : '#e2e8f0'}`,
-                      backgroundColor: isSelected ? '#eff6ff' : '#fff',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <div style={{ fontWeight: 700, fontSize: '0.85rem', color: isSelected ? '#1e40af' : '#1e293b' }}>{def.name}</div>
-                    <div style={{ fontSize: '0.7rem', color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{def.description}</div>
+              
+              {/* BUILT-IN TOOLS COLLAPSIBLE SECTION */}
+              <div style={{ marginBottom: '0.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.5rem 0.75rem', backgroundColor: '#f1f5f9', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
+                  <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#475569' }}>BUILT-IN TOOLS</span>
+                  <button onClick={toggleBuiltInTools} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.7rem', color: '#94a3b8' }}>
+                    {builtInToolsExpanded ? 'COLLAPSE' : 'EXPAND'}
+                  </button>
+                </div>
+                {builtInToolsExpanded && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
+                    {builtInToolDefs.map(def => {
+                      const isSelected = localSelectedToolId === def.name;
+                      return (
+                        <div 
+                          key={def.name}
+                          onClick={() => setSelectedToolId(def.name)}
+                          style={{ 
+                            padding: '0.6rem', 
+                            borderRadius: '6px', 
+                            border: `1px solid ${isSelected ? '#3b82f6' : '#e2e8f0'}`,
+                            backgroundColor: isSelected ? '#eff6ff' : '#fff',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <div style={{ fontWeight: 700, fontSize: '0.8rem', color: isSelected ? '#1e40af' : '#1e293b' }}>{def.name}</div>
+                          <div style={{ fontSize: '0.65rem', color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{def.description}</div>
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })}
+                )}
+              </div>
+
+              {/* USER TOOLS COLLAPSIBLE SECTION */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.5rem 0.75rem', backgroundColor: '#f1f5f9', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
+                  <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#475569' }}>MY CUSTOM TOOLS ({customTools.length})</span>
+                  <button onClick={toggleUserTools} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.7rem', color: '#94a3b8' }}>
+                    {userToolsExpanded ? 'COLLAPSE' : 'EXPAND'}
+                  </button>
+                </div>
+                {userToolsExpanded && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
+                    {customTools.length === 0 ? (
+                      <div style={{ fontSize: '0.7rem', color: '#94a3b8', textAlign: 'center', padding: '1rem' }}>
+                        No custom tools yet. Click "+ Add Custom" to create one.
+                      </div>
+                    ) : (
+                      customTools.map(tool => {
+                        const isSelected = localSelectedToolId === tool.id;
+                        return (
+                          <div 
+                            key={tool.id}
+                            onClick={() => setSelectedToolId(tool.id)}
+                            style={{ 
+                              padding: '0.6rem', 
+                              borderRadius: '6px', 
+                              border: `1px solid ${isSelected ? '#3b82f6' : '#e2e8f0'}`,
+                              backgroundColor: isSelected ? '#eff6ff' : '#fff',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            <div style={{ fontWeight: 700, fontSize: '0.8rem', color: isSelected ? '#1e40af' : '#1e293b' }}>{tool.name}</div>
+                            <div style={{ fontSize: '0.65rem', color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{tool.description}</div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+              </div>
+
             </div>
           </div>
         </div>
@@ -640,91 +906,184 @@ export default function ToolsSandbox() {
 
       {/* CENTER PANEL - TOOL WORKSPACE */}
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: '1px solid #e2e8f0', backgroundColor: '#fff', overflow: 'hidden' }}>
-        {selectedTool ? (
+        {selectedTool || selectedCustomTool ? (
           <>
             <div style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fcfcfc' }}>
-              <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800 }}>{selectedTool.name.toUpperCase()} WORKSPACE</h2>
-              <button onClick={() => resetToolDraft(selectedTool.name)} style={{ fontSize: '0.7rem', color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer' }}>Reset Tool</button>
+              <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800 }}>
+                {selectedCustomTool ? selectedCustomTool.name.toUpperCase() : selectedTool!.name.toUpperCase()} 
+                {selectedCustomTool && <span style={{ fontSize: '0.65rem', color: '#64748b', marginLeft: '0.5rem' }}>(Custom)</span>}
+              </h2>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                {selectedTool && (
+                  <button onClick={() => resetToolDraft(selectedTool.name)} style={{ fontSize: '0.7rem', color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer' }}>Reset Tool</button>
+                )}
+                {selectedCustomTool && (
+                  <>
+                    <button 
+                      onClick={() => updateCustomTool(selectedCustomTool.id, { enabled: !selectedCustomTool.enabled })}
+                      style={{ fontSize: '0.7rem', color: selectedCustomTool.enabled ? '#10b981' : '#94a3b8', background: 'none', border: 'none', cursor: 'pointer' }}
+                    >
+                      {selectedCustomTool.enabled ? 'Enabled' : 'Disabled'}
+                    </button>
+                    <button 
+                      onClick={() => deleteCustomTool(selectedCustomTool.id)}
+                      style={{ fontSize: '0.7rem', color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer' }}
+                    >
+                      Delete
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
 
             <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
               
-              {/* 1. CODE EDITOR */}
+              {/* ROW 1: NAME (full width) */}
               <section>
-                <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.75rem' }}>1. CLIENT IMPLEMENTATION</h3>
-                <textarea 
-                  key={`code-${selectedToolId}`}
-                  value={selectedTool.code} 
-                  onChange={(e) => updateToolDraft(selectedToolId!, { code: e.target.value })}
-                  style={{ width: '100%', padding: '1rem', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.8rem', fontFamily: 'monospace', minHeight: '250px', backgroundColor: '#1e293b', color: '#e2e8f0' }}
+                <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.5rem' }}>NAME</h3>
+                <input 
+                  type="text"
+                  value={selectedCustomTool ? selectedCustomTool.name : (selectedTool?.name || '')}
+                  onChange={(e) => selectedCustomTool && updateCustomTool(selectedCustomTool.id, { name: e.target.value })}
+                  readOnly={!selectedCustomTool}
+                  style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '0.8rem', backgroundColor: '#fff', color: '#1e293b' }}
                 />
-                <div style={{ fontSize: '0.65rem', color: '#64748b', marginTop: '0.5rem' }}>Available: args, helpers (now, sleep, log)</div>
               </section>
 
-              {/* 2. INVOCATION SIMULATOR */}
+              {/* ROW 2: DESCRIPTION (full width) */}
               <section>
-                <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.75rem' }}>2. INVOCATION SIMULATOR</h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <label style={{ fontSize: '0.65rem', fontWeight: 700, color: '#64748b' }}>ARGUMENTS (JSON)</label>
-                      <div style={{ display: 'flex', gap: '0.5rem' }}>
-                        <button onClick={() => loadExampleArgs(selectedToolId!)} style={{ fontSize: '0.65rem', padding: '0.1rem 0.3rem', border: '1px solid #e2e8f0', background: '#fff', borderRadius: '4px', cursor: 'pointer' }}>Example</button>
-                        <button onClick={() => updateInvocationDraft(selectedToolId!, { argsText: "{}" })} style={{ fontSize: '0.65rem', padding: '0.1rem 0.3rem', border: '1px solid #e2e8f0', background: '#fff', borderRadius: '4px', cursor: 'pointer' }}>Empty</button>
-                      </div>
-                    </div>
+                <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.5rem' }}>DESCRIPTION</h3>
+                <input 
+                  type="text"
+                  value={selectedCustomTool ? selectedCustomTool.description : (selectedTool?.description || '')}
+                  onChange={(e) => selectedCustomTool && updateCustomTool(selectedCustomTool.id, { description: e.target.value })}
+                  readOnly={!selectedCustomTool}
+                  style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '0.8rem', backgroundColor: '#fff', color: '#1e293b' }}
+                />
+              </section>
+
+              {/* ROW 3: CLIENT IMPLEMENTATION | PARAMETERS (side by side) */}
+              <section>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+                  <div>
+                    <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.5rem' }}>CLIENT IMPLEMENTATION</h3>
                     <textarea 
-                      key={`args-${selectedToolId}`}
-                      value={selectedInvocation?.argsText} 
-                      onChange={(e) => { 
-                        updateInvocationDraft(selectedToolId!, { argsText: e.target.value }); 
-                        if (lastValidation[selectedToolId!]) {
-                          setLastValidation(prev => { const n = {...prev}; delete n[selectedToolId!]; return n; });
-                        }
+                      key={`code-${localSelectedToolId}`}
+                      value={selectedCustomTool ? selectedCustomTool.code : (selectedTool?.code || '')}
+                      onChange={(e) => {
+                        if (selectedCustomTool) updateCustomTool(selectedCustomTool.id, { code: e.target.value });
+                        else if (selectedTool) updateToolDraft(localSelectedToolId!, { code: e.target.value });
                       }}
-                      style={{ padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '0.8rem', fontFamily: 'monospace', minHeight: '100px' }}
+                      style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '0.75rem', fontFamily: 'monospace', minHeight: '220px', resize: 'vertical' }}
                     />
-                    {lastValidation[selectedToolId!] && (
-                      <div style={{ fontSize: '0.75rem', color: lastValidation[selectedToolId!].ok ? '#10b981' : '#ef4444' }}>
-                        {lastValidation[selectedToolId!].ok ? 'Valid' : `Errors: ${lastValidation[selectedToolId!].errors.join(', ')}`}
-                      </div>
+                    <div style={{ fontSize: '0.65rem', color: '#64748b', marginTop: '0.5rem' }}>Available: args, helpers (now, sleep, log)</div>
+                  </div>
+                  <div>
+                    <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.5rem' }}>PARAMETERS (JSON SCHEMA)</h3>
+                      {selectedCustomTool ? (
+                        <textarea 
+                          value={JSON.stringify(selectedCustomTool.parameters, null, 2)}
+                          onChange={(e) => {
+                            try {
+                              const params = JSON.parse(e.target.value);
+                              updateCustomTool(selectedCustomTool.id, { parameters: params });
+                            } catch (err) {}
+                          }}
+                          style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '0.75rem', fontFamily: 'monospace', minHeight: '220px', resize: 'vertical' }}
+                        />
+                    ) : (
+                      <textarea 
+                        key={`schema-${localSelectedToolId}`}
+                        value={selectedTool?.schemaText || ''}
+                        onChange={(e) => updateToolDraft(localSelectedToolId!, { schemaText: e.target.value })}
+                        style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '0.75rem', fontFamily: 'monospace', minHeight: '220px', resize: 'vertical' }}
+                      />
                     )}
                   </div>
-                  <div style={{ display: 'flex', gap: '1rem' }}>
-                    <button onClick={() => handleValidate(selectedToolId!)} style={{ flex: 1, padding: '0.75rem', border: '1px solid #e2e8f0', backgroundColor: '#fff', color: '#1e293b', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}>VALIDATE</button>
-                    <button onClick={() => handleExecute(selectedToolId!)} style={{ flex: 2, padding: '0.75rem', backgroundColor: '#0f172a', color: '#fff', borderRadius: '8px', fontWeight: 700, cursor: 'pointer', border: 'none' }}>RUN ACTION</button>
+                </div>
+              </section>
+
+              {/* ROW 4: INVOCATION SIMULATOR | EXECUTION PIPELINE (side by side) */}
+              <section>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+                  {/* INVOCATION SIMULATOR */}
+                  <div>
+                    <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.5rem' }}>INVOCATION SIMULATOR</h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <label style={{ fontSize: '0.65rem', fontWeight: 700, color: '#64748b' }}>ARGUMENTS (JSON)</label>
+                        {selectedCustomTool ? (
+                          <button onClick={() => updateCustomInvocationDraft(selectedCustomTool.id, { argsText: "{}" })} style={{ fontSize: '0.65rem', padding: '0.1rem 0.3rem', border: '1px solid #e2e8f0', background: '#fff', borderRadius: '4px', cursor: 'pointer' }}>Empty</button>
+                        ) : (
+                          <div style={{ display: 'flex', gap: '0.5rem' }}>
+                            <button onClick={() => loadExampleArgs(localSelectedToolId!)} style={{ fontSize: '0.65rem', padding: '0.1rem 0.3rem', border: '1px solid #e2e8f0', background: '#fff', borderRadius: '4px', cursor: 'pointer' }}>Example</button>
+                            <button onClick={() => updateInvocationDraft(localSelectedToolId!, { argsText: "{}" })} style={{ fontSize: '0.65rem', padding: '0.1rem 0.3rem', border: '1px solid #e2e8f0', background: '#fff', borderRadius: '4px', cursor: 'pointer' }}>Empty</button>
+                          </div>
+                        )}
+                      </div>
+                      {selectedCustomTool ? (
+                        <>
+                          <textarea 
+                            value={selectedCustomInvocation.argsText}
+                            onChange={(e) => updateCustomInvocationDraft(selectedCustomTool.id, { argsText: e.target.value })}
+                            style={{ padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '0.75rem', fontFamily: 'monospace', minHeight: '80px' }}
+                          />
+                          {lastValidation[selectedCustomTool.id] && (
+                            <div style={{ fontSize: '0.7rem', color: lastValidation[selectedCustomTool.id].ok ? '#10b981' : '#ef4444' }}>
+                              {lastValidation[selectedCustomTool.id].ok ? 'Valid' : `Errors: ${lastValidation[selectedCustomTool.id].errors.join(', ')}`}
+                            </div>
+                          )}
+                          <div style={{ display: 'flex', gap: '0.5rem' }}>
+                            <button onClick={handleCustomValidate} style={{ flex: 1, padding: '0.5rem', border: '1px solid #e2e8f0', backgroundColor: '#fff', color: '#1e293b', borderRadius: '4px', fontWeight: 700, cursor: 'pointer', fontSize: '0.7rem' }}>VALIDATE</button>
+                            <button onClick={handleCustomExecute} style={{ flex: 2, padding: '0.5rem', backgroundColor: '#0f172a', color: '#fff', borderRadius: '4px', fontWeight: 700, cursor: 'pointer', border: 'none', fontSize: '0.7rem' }}>RUN ACTION</button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <textarea 
+                            key={`args-${localSelectedToolId}`}
+                            value={selectedInvocation?.argsText || ''}
+                            onChange={(e) => {
+                              updateInvocationDraft(localSelectedToolId!, { argsText: e.target.value });
+                              if (lastValidation[localSelectedToolId!]) {
+                                setLastValidation(prev => { const n = {...prev}; delete n[localSelectedToolId!]; return n; });
+                              }
+                            }}
+                            style={{ padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '0.75rem', fontFamily: 'monospace', minHeight: '80px' }}
+                          />
+                          {lastValidation[localSelectedToolId!] && (
+                            <div style={{ fontSize: '0.7rem', color: lastValidation[localSelectedToolId!].ok ? '#10b981' : '#ef4444' }}>
+                              {lastValidation[localSelectedToolId!].ok ? 'Valid' : `Errors: ${lastValidation[localSelectedToolId!].errors.join(', ')}`}
+                            </div>
+                          )}
+                          <div style={{ display: 'flex', gap: '0.5rem' }}>
+                            <button onClick={() => handleValidate(localSelectedToolId!)} style={{ flex: 1, padding: '0.5rem', border: '1px solid #e2e8f0', backgroundColor: '#fff', color: '#1e293b', borderRadius: '4px', fontWeight: 700, cursor: 'pointer', fontSize: '0.7rem' }}>VALIDATE</button>
+                            <button onClick={() => handleExecute(localSelectedToolId!)} style={{ flex: 2, padding: '0.5rem', backgroundColor: '#0f172a', color: '#fff', borderRadius: '4px', fontWeight: 700, cursor: 'pointer', border: 'none', fontSize: '0.7rem' }}>RUN ACTION</button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* EXECUTION PIPELINE */}
+                  <div style={{ opacity: pipeline.active ? 1 : 0.5 }}>
+                    <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.5rem' }}>EXECUTION PIPELINE</h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', backgroundColor: '#f1f5f9', padding: '0.75rem', borderRadius: '8px' }}>
+                      {[
+                        { label: "RAW INPUT", value: pipeline.rawArgsText },
+                        { label: "VALIDATION", value: pipeline.validation.ok ? "PASS" : "FAIL", error: pipeline.validation.errors.join(', ') },
+                        { label: "RESULT", value: pipeline.result, error: pipeline.error, isJson: true }
+                      ].map((s, i) => (
+                        <div key={i} style={{ padding: '0.4rem', backgroundColor: '#fff', borderRadius: '4px', borderLeft: `3px solid ${s.error ? '#ef4444' : (s.value !== undefined ? '#10b981' : '#cbd5e1')}` }}>
+                          <div style={{ fontSize: '0.55rem', fontWeight: 800, color: '#94a3b8' }}>{s.label}</div>
+                          <div style={{ fontSize: '0.65rem' }}>
+                            {s.error ? <span style={{ color: '#ef4444' }}>{s.error}</span> : (s.isJson ? <pre style={{ margin: 0, fontSize: '0.6rem' }}>{JSON.stringify(s.value, null, 2)}</pre> : String(s.value ?? '—'))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
-              </section>
-
-              {/* 3. PIPELINE & RESULT */}
-              <section style={{ opacity: pipeline.active ? 1 : 0.5 }}>
-                <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.75rem' }}>3. EXECUTION PIPELINE</h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', backgroundColor: '#f1f5f9', padding: '1rem', borderRadius: '8px' }}>
-                  {[
-                    { label: "RAW INPUT", value: pipeline.rawArgsText },
-                    { label: "VALIDATION", value: pipeline.validation.ok ? "PASS" : "FAIL", error: pipeline.validation.errors.join(', ') },
-                    { label: "RESULT", value: pipeline.result, error: pipeline.error, isJson: true }
-                  ].map((s, i) => (
-                    <div key={i} style={{ padding: '0.5rem', backgroundColor: '#fff', borderRadius: '4px', borderLeft: `3px solid ${s.error ? '#ef4444' : (s.value !== undefined ? '#10b981' : '#cbd5e1')}` }}>
-                      <div style={{ fontSize: '0.6rem', fontWeight: 800, color: '#94a3b8' }}>{s.label}</div>
-                      <div style={{ fontSize: '0.75rem' }}>
-                        {s.error ? <span style={{ color: '#ef4444' }}>{s.error}</span> : (s.isJson ? <pre style={{ margin: 0, fontSize: '0.7rem' }}>{JSON.stringify(s.value, null, 2)}</pre> : String(s.value ?? '—'))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              {/* 4. DEFINITION (REDUCED) */}
-              <section>
-                <h3 style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '0.75rem' }}>4. SCHEMA DEFINITION</h3>
-                <textarea 
-                  key={`schema-${selectedToolId}`}
-                  value={selectedTool.schemaText} 
-                  onChange={(e) => updateToolDraft(selectedToolId!, { schemaText: e.target.value })}
-                  style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '0.75rem', fontFamily: 'monospace', minHeight: '100px' }}
-                />
               </section>
 
             </div>
