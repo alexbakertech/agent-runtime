@@ -20,7 +20,7 @@ import type {
   RuntimeSpecState,
 } from './types';
 import { CURRENT_VERSION } from './types';
-import { RuntimeSpec, RuntimeExecutionState, createChatAgentRuntimeSpec } from '@/lib/runtime/spec/types';
+import { RuntimeSpec, RuntimeExecutionState, createDefaultRuntime } from '@/lib/runtime/spec/types';
 
 const DEFAULT_SYSTEM_PROMPT = "You are a helpful AI assistant. Answer concisely.";
 
@@ -98,27 +98,25 @@ function createDefaultRuntimeExecutionState(): RuntimeExecutionState {
   return {
     runtimeSpecId: null,
     isRunning: false,
-    currentStepIndex: 0,
-    currentIteration: 0,
-    stepStatuses: {},
+    currentBlockIndex: 0,
+    blockStatuses: {},
     results: {},
-    stepOutputs: {},
-    stepContexts: {},
+    blockOutputs: {},
     currentInput: '',
-    isStepMode: false,
+    timeline: [],
     startedAt: null,
     finishedAt: null,
   };
 }
 
 function createDefaultRuntimeSpecState(): RuntimeSpecState {
-  const chatAgentSpec = createChatAgentRuntimeSpec();
+  const defaultRuntime = createDefaultRuntime();
   return {
     showRawJson: false,
-    runtimeSpecs: { [chatAgentSpec.id]: chatAgentSpec },
-    activeRuntimeSpecId: chatAgentSpec.id,
+    runtimeSpecs: { [defaultRuntime.id]: defaultRuntime },
+    activeRuntimeSpecId: defaultRuntime.id,
     runtimeExecution: createDefaultRuntimeExecutionState(),
-    stepDraft: null,
+    blockDraft: null,
     isLocked: false,
   };
 }

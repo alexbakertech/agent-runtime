@@ -1,16 +1,17 @@
 import {
   RuntimeSpec,
-  RuntimeStep,
+  RuntimeBlock,
   RuntimeExecutionState,
   RuntimeEvent,
   RuntimeEventHandler,
-  RuntimeStepStatus,
-  StepResult,
-  StepOutput,
-  PromptStep,
-  ToolStep,
-  LoopStep,
-  ContextOutputMode,
+  RuntimeBlockStatus,
+  BlockResult,
+  BlockOutput,
+  StartBlock,
+  ThinkBlock,
+  ToolBlock,
+  RespondBlock,
+  StopBlock,
 } from './types';
 import { RuntimeEngine } from '../engine';
 import { RuntimeConfig, Override, RequestAssemblyOptions } from '../types';
@@ -37,7 +38,7 @@ export class RuntimeExecutor {
     this.onEvent = onEvent;
     this.runtimeEngine = new RuntimeEngine((stage, data) => {
       this.onEvent({
-        type: 'stepComplete',
+        type: 'toolResult',
         data: { stage, data },
       });
     });
@@ -48,14 +49,12 @@ export class RuntimeExecutor {
     return {
       runtimeSpecId: null,
       isRunning: false,
-      currentStepIndex: 0,
-      currentIteration: 0,
-      stepStatuses: {},
+      currentBlockIndex: 0,
+      blockStatuses: {},
       results: {},
-      stepOutputs: {},
-      stepContexts: {},
+      blockOutputs: {},
       currentInput: '',
-      isStepMode: false,
+      timeline: [],
       startedAt: null,
       finishedAt: null,
     };
@@ -65,26 +64,26 @@ export class RuntimeExecutor {
     return this.executionState;
   }
 
-  getStepStatus(stepId: string): RuntimeStepStatus {
-    return this.executionState.stepStatuses[stepId] || 'pending';
+  getBlockStatus(blockId: string): RuntimeBlockStatus {
+    return this.executionState.blockStatuses[blockId] || 'pending';
   }
 
-  getStepOutput(stepId: string): StepOutput | undefined {
-    return this.executionState.stepOutputs[stepId];
+  getBlockOutput(blockId: string): BlockOutput | undefined {
+    return this.executionState.blockOutputs[blockId];
   }
 
-  setStepOutput(stepId: string, output: StepOutput) {
-    this.executionState.stepOutputs[stepId] = output;
+  setBlockOutput(blockId: string, output: BlockOutput) {
+    this.executionState.blockOutputs[blockId] = output;
   }
 
-  toggleStepOutputInclusion(stepId: string, included: boolean) {
-    if (this.executionState.stepOutputs[stepId]) {
-      this.executionState.stepOutputs[stepId].includedInContext = included;
+  toggleBlockOutputInclusion(blockId: string, included: boolean) {
+    if (this.executionState.blockOutputs[blockId]) {
+      this.executionState.blockOutputs[blockId].includedInContext = included;
     }
   }
 
-  private updateStepStatus(stepId: string, status: RuntimeStepStatus) {
-    this.executionState.stepStatuses[stepId] = status;
+  private updateBlockStatus(blockId: string, status: RuntimeBlockStatus) {
+    this.executionState.blockStatuses[blockId] = status;
   }
 
   private emit(event: RuntimeEvent) {
@@ -105,7 +104,7 @@ export class RuntimeExecutor {
     transcript: Message[],
     overrides: Record<number, Override> = {},
     options: RequestAssemblyOptions = {}
-  ): Promise<Record<string, StepResult>> {
+  ): Promise<Record<string, BlockResult>> {
     if (!this.spec) {
       throw new Error('No runtime spec loaded');
     }
@@ -113,8 +112,8 @@ export class RuntimeExecutor {
     this.executionState.isRunning = true;
     this.executionState.startedAt = new Date().toISOString();
     this.executionState.currentInput = input;
-    this.executionState.stepOutputs = {};
-    this.executionState.stepContexts = {};
+    this.executionState.blockOutputs = {};
+    this.executionState.timeline = [];
 
     this.context = {
       config,
@@ -132,13 +131,13 @@ export class RuntimeExecutor {
     this.emit({ type: 'runtimeStart', data: { specId: this.spec.id } });
 
     try {
-      await this.executeSteps(this.spec.steps);
+      await this.executeBlocks(this.spec.blocks);
       
       this.executionState.finishedAt = new Date().toISOString();
       this.emit({ type: 'runtimeComplete', data: { results: this.executionState.results } });
     } catch (error) {
       this.emit({
-        type: 'stepFailed',
+        type: 'blockFailed',
         data: { error: error instanceof Error ? error.message : 'Unknown error' },
       });
       throw error;
@@ -149,220 +148,216 @@ export class RuntimeExecutor {
     return this.executionState.results;
   }
 
-  private async executeSteps(steps: RuntimeStep[]): Promise<void> {
-    for (let i = 0; i < steps.length; i++) {
-      const step = steps[i];
+  private async executeBlocks(blocks: RuntimeBlock[]): Promise<void> {
+    for (let i = 0; i < blocks.length; i++) {
+      const block = blocks[i];
       
-      if (!step.enabled) {
-        this.updateStepStatus(step.id, 'skipped');
+      if (!block.enabled) {
+        this.updateBlockStatus(block.id, 'skipped');
         continue;
       }
 
-      this.executionState.currentStepIndex = i;
-      this.updateStepStatus(step.id, 'running');
+      this.executionState.currentBlockIndex = i;
+      this.updateBlockStatus(block.id, 'running');
       this.emit({
-        type: 'stepStart',
-        stepId: step.id,
-        stepIndex: i,
+        type: 'blockStart',
+        blockId: block.id,
+        blockIndex: i,
       });
 
+      if (block.type === 'tool') {
+        this.emit({
+          type: 'toolExposed',
+          blockId: block.id,
+          data: { tools: (block as ToolBlock).allowedTools },
+        });
+      }
+
       try {
-        await this.executeStep(step);
-        this.updateStepStatus(step.id, 'completed');
+        await this.executeBlock(block);
+        this.updateBlockStatus(block.id, 'completed');
       } catch (error) {
-        this.updateStepStatus(step.id, 'failed');
+        this.updateBlockStatus(block.id, 'failed');
         throw error;
       }
     }
   }
 
-  private async executeStep(step: RuntimeStep): Promise<void> {
+  private async executeBlock(block: RuntimeBlock): Promise<void> {
     const startTime = Date.now();
-    let result: StepResult;
+    let result: BlockResult;
 
     try {
-      switch (step.type) {
-        case 'prompt':
-          result = await this.executePromptStep(step);
+      switch (block.type) {
+        case 'start':
+          result = await this.executeStartBlock(block as StartBlock);
+          break;
+        case 'think':
+          result = await this.executeThinkBlock(block as ThinkBlock);
           break;
         case 'tool':
-          result = await this.executeToolStep(step);
+          result = await this.executeToolBlock(block as ToolBlock);
           break;
-        case 'loop':
-          result = await this.executeLoopStep(step);
+        case 'respond':
+          result = await this.executeRespondBlock(block as RespondBlock);
+          break;
+        case 'stop':
+          result = await this.executeStopBlock(block as StopBlock);
           break;
         default:
-          throw new Error(`Unknown step type: ${(step as RuntimeStep).type}`);
+          throw new Error(`Unknown block type: ${(block as RuntimeBlock).type}`);
       }
 
       result.duration = Date.now() - startTime;
-      this.executionState.results[step.id] = result;
+      this.executionState.results[block.id] = result;
     } catch (error) {
       result = {
-        stepId: step.id,
+        blockId: block.id,
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
         duration: Date.now() - startTime,
       };
-      this.executionState.results[step.id] = result;
+      this.executionState.results[block.id] = result;
       throw error;
     }
   }
 
-  private async executePromptStep(step: PromptStep): Promise<StepResult> {
+  private async executeStartBlock(block: StartBlock): Promise<BlockResult> {
     if (!this.context) throw new Error('No execution context');
 
     const previousContext = this.context.input;
-    const promptContent = step.content;
-    let stepContext = '';
+    let blockContext = 'Starting runtime';
 
-    if (step.promptType === 'system') {
-      this.context.options.prefix = promptContent;
-      this.context.options.prefixEnabled = true;
-      stepContext = `[SYSTEM PROMPT]: ${promptContent}`;
-    } else if (step.promptType === 'user') {
-      this.context.input = promptContent + '\n' + this.context.input;
-      stepContext = `[USER PROMPT]: ${promptContent}`;
-    } else if (step.promptType === 'hidden') {
-      this.context.input = promptContent + '\n' + this.context.input;
-      stepContext = `[HIDDEN PROMPT]: ${promptContent}`;
+    if (block.acceptsUserInput) {
+      blockContext += `\nUser input will be: ${this.context.input}`;
     }
 
-    this.context.options.includeThinkingInContext = step.contextOutputMode === 'all' || step.contextOutputMode === 'thinkingOnly';
+    if (block.includeDefaults && this.spec?.runtimeDefaults?.globalInstructions) {
+      const globalInstructions = this.spec.runtimeDefaults.globalInstructions;
+      this.context.options.prefix = globalInstructions;
+      this.context.options.prefixEnabled = true;
+      blockContext += `\nGlobal instructions: ${globalInstructions}`;
+    }
+
+    if (block.startupInstructions) {
+      blockContext += `\nStartup instructions: ${block.startupInstructions}`;
+    }
+
+    const blockOutput: BlockOutput = {
+      blockId: block.id,
+      rawOutput: blockContext,
+      includedInContext: true,
+      previousContext,
+      blockContext,
+    };
+    this.executionState.blockOutputs[block.id] = blockOutput;
+
+    return {
+      blockId: block.id,
+      success: true,
+      output: blockContext,
+      duration: 0,
+    };
+  }
+
+  private async executeThinkBlock(block: ThinkBlock): Promise<BlockResult> {
+    if (!this.context) throw new Error('No execution context');
+
+    const previousContext = this.context.input;
+    let blockContext = '';
+    
+    if (block.contextSources.runtimeInstructions && this.context.options.prefix) {
+      blockContext += `[Instructions]: ${this.context.options.prefix}\n`;
+    }
+    if (block.contextSources.userInput) {
+      blockContext += `[User Input]: ${this.context.input}\n`;
+    }
+    if (block.contextSources.toolResults && Object.keys(this.context.toolResults).length > 0) {
+      blockContext += `[Tool Results]: ${JSON.stringify(this.context.toolResults, null, 2)}\n`;
+    }
+
+    const promptWithInstructions = blockContext + (block.instructionText ? `\n${block.instructionText}\n` : '') + `\nDecide what to do next.`;
 
     const response = await this.runtimeEngine.run(
       this.context.config,
-      this.context.input,
+      promptWithInstructions,
       this.context.transcript,
       this.context.overrides,
       this.context.options
     );
 
-    const contentToInclude = this.determineContextContent(response.content, response.reasoning, step.contextOutputMode, step.includeInContext);
-    let sentToNext = '';
-    if (step.includeInContext && contentToInclude) {
-      this.context.input += '\n---\n' + contentToInclude;
-      this.context.accumulatedContext += contentToInclude;
-      sentToNext = contentToInclude;
+    const blockOutput: BlockOutput = {
+      blockId: block.id,
+      rawOutput: response.content,
+      reasoning: response.reasoning,
+      includedInContext: true,
+      previousContext,
+      blockContext,
+    };
+    this.executionState.blockOutputs[block.id] = blockOutput;
+
+    if (block.contextSources.priorBlockOutputs) {
+      this.context.input += '\n---\n' + response.content;
+      this.context.accumulatedContext += response.content;
     }
 
-    const stepOutput: StepOutput = {
-      stepId: step.id,
-      rawOutput: response.content,
-      includedInContext: step.includeInContext,
-      reasoning: response.reasoning,
-      previousContext,
-      stepContext,
-      sentToNext,
-    };
-    this.executionState.stepOutputs[step.id] = stepOutput;
-
     return {
-      stepId: step.id,
+      blockId: block.id,
       success: true,
       output: response.content,
       duration: 0,
     };
   }
 
-  private determineContextContent(content: string, reasoning: string | undefined, mode: ContextOutputMode, includeInContext: boolean): string {
-    if (!includeInContext) return '';
-    
-    switch (mode) {
-      case 'all':
-        return reasoning ? `<thinking>\n${reasoning}\n</thinking>\n\n${content}` : content;
-      case 'responseOnly':
-        return content;
-      case 'thinkingOnly':
-        return reasoning ? `<thinking>\n${reasoning}\n</thinking>` : '';
-      case 'none':
-        return '';
-      default:
-        return content;
-    }
-  }
-
-  private async executeToolStep(step: ToolStep): Promise<StepResult> {
+  private async executeToolBlock(block: ToolBlock): Promise<BlockResult> {
     if (!this.context) throw new Error('No execution context');
 
     const previousContext = this.context.input;
-    let stepContext = '';
+    let blockContext = '';
     let toolOutput = '';
-    let toolReasoning: string | undefined;
+    let toolCallInfo: { toolName: string; arguments: Record<string, unknown>; result?: string } | undefined;
 
-    if (step.toolStepMode === 'execute' || step.toolStepMode === 'executeAndInject') {
-      if (step.autoExecute) {
-        const toolResult = await this.executeTool(step.toolName, this.context.toolResults);
-        this.context.toolResults[step.toolName] = toolResult;
-        
-        toolOutput = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult, null, 2);
-        stepContext = `[TOOL EXECUTE]: ${step.toolName}\nResult: ${toolOutput}`;
-        
-        if (step.toolStepMode === 'executeAndInject') {
-          const injectedContent = step.injectionPrompt.replace('{{results}}', toolOutput);
-          this.context.input = this.context.input + '\n' + injectedContent;
-          stepContext += `\n[INJECTED]: ${injectedContent}`;
-        }
-      } else {
-        stepContext = `[TOOL EXECUTE]: ${step.toolName} (auto-execute disabled)`;
-      }
+    if (block.toolAccessMode === 'fixed' && block.allowedTools[0]) {
+      this.emit({
+        type: 'toolCalled',
+        blockId: block.id,
+        data: { toolName: block.allowedTools[0], args: block.staticArguments },
+      });
+
+      const toolResult = await this.executeTool(block.allowedTools[0], block.staticArguments);
+      this.context.toolResults[block.allowedTools[0]] = toolResult;
+      
+      toolOutput = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult, null, 2);
+      blockContext = `[TOOL]: ${block.allowedTools[0]}\nResult: ${toolOutput}`;
+      
+      toolCallInfo = {
+        toolName: block.allowedTools[0],
+        arguments: block.staticArguments,
+        result: toolOutput,
+      };
+    } else if (block.toolAccessMode === 'modelChoice' && block.allowedTools.length > 0) {
+      blockContext = `[TOOL CHOICE]: Model can choose from: ${block.allowedTools.join(', ')}`;
     }
 
-    if (step.toolStepMode === 'present') {
-      const toolInfo = `You have access to the tool: ${step.toolName}. You may use it if needed.`;
-      this.context.input = this.context.input + '\n' + toolInfo;
-      stepContext = `[PRESENT TO MODEL]: ${step.toolName}`;
-    }
-
-    if (step.toolStepMode === 'forceExecute') {
-      const forcePrompt = `You must use the tool "${step.toolName}" to complete this task. Please call it now with appropriate arguments.`;
-      this.context.input = this.context.input + '\n' + forcePrompt;
-      stepContext = `[FORCE TOOL CALL]: ${step.toolName}`;
-    }
-
-    if (step.toolStepMode === 'inject' && step.toolRefStepId) {
-      const refOutput = this.executionState.stepOutputs[step.toolRefStepId];
-      if (refOutput) {
-        toolOutput = refOutput.rawOutput;
-        const injectedContent = step.injectionPrompt.replace('{{results}}', toolOutput);
-        this.context.input = this.context.input + '\n' + injectedContent;
-        stepContext = `[INJECT FROM STEP]: ${step.toolRefStepId}`;
-      }
-    }
-
-    this.context.options.includeThinkingInContext = step.contextOutputMode === 'all' || step.contextOutputMode === 'thinkingOnly';
-
-    const response = await this.runtimeEngine.run(
-      this.context.config,
-      this.context.input,
-      this.context.transcript,
-      this.context.overrides,
-      this.context.options
-    );
-
-    const contentToInclude = this.determineContextContent(response.content, response.reasoning, step.contextOutputMode, step.includeInContext);
-    let sentToNext = '';
-    if (step.includeInContext && contentToInclude) {
-      this.context.input += '\n---\n' + contentToInclude;
-      this.context.accumulatedContext += contentToInclude;
-      sentToNext = contentToInclude;
-    }
-
-    const stepOutput: StepOutput = {
-      stepId: step.id,
-      rawOutput: response.content,
-      includedInContext: step.includeInContext,
-      reasoning: response.reasoning,
+    const blockOutput: BlockOutput = {
+      blockId: block.id,
+      rawOutput: toolOutput || blockContext,
+      includedInContext: block.resultHandling !== 'internal',
       previousContext,
-      stepContext,
-      sentToNext,
+      blockContext,
+      toolCall: toolCallInfo,
     };
-    this.executionState.stepOutputs[step.id] = stepOutput;
+    this.executionState.blockOutputs[block.id] = blockOutput;
+
+    if (block.resultHandling === 'nextThink' || block.resultHandling === 'blockOutput') {
+      this.context.input += '\n---\n' + (toolOutput || blockContext);
+      this.context.accumulatedContext += toolOutput || blockContext;
+    }
 
     return {
-      stepId: step.id,
+      blockId: block.id,
       success: true,
-      output: response.content,
+      output: toolOutput || blockContext,
       duration: 0,
     };
   }
@@ -382,88 +377,71 @@ export class RuntimeExecutor {
     }
   }
 
-  private async executeLoopStep(step: LoopStep): Promise<StepResult> {
+  private async executeRespondBlock(block: RespondBlock): Promise<BlockResult> {
     if (!this.context) throw new Error('No execution context');
 
-    let iteration = 0;
-    let shouldContinue = true;
-    const allOutputs: string[] = [];
-
-    while (shouldContinue) {
-      iteration++;
-      this.executionState.currentIteration = iteration;
-      
-      this.emit({
-        type: 'iterationStart',
-        stepId: step.id,
-        iteration,
-      });
-
-      try {
-        await this.executeSteps(step.nestedSteps);
-        
-        const stepResult = this.executionState.results[step.nestedSteps[step.nestedSteps.length - 1]?.id];
-        if (stepResult) {
-          allOutputs.push(stepResult.output || '');
-        }
-      } catch (error) {
-        if (!step.continueOnFailure) {
-          throw error;
-        }
-      }
-
-      shouldContinue = this.evaluateLoopCondition(step, iteration);
-
-      this.emit({
-        type: 'iterationComplete',
-        stepId: step.id,
-        iteration,
-      });
-    }
-
-    const combinedOutput = allOutputs.join('\n---\n');
     const previousContext = this.context.input;
-    const stepContext = `[LOOP]: ${step.condition} (${step.maxIterations} iterations)`;
-    
-    let sentToNext = '';
-    if (step.includeInContext) {
-      const contentToInclude = this.determineContextContent(combinedOutput, undefined, step.contextOutputMode, step.includeInContext);
-      if (contentToInclude) {
-        this.context.input += '\n---\n' + contentToInclude;
-        this.context.accumulatedContext += contentToInclude;
-        sentToNext = contentToInclude;
-      }
+    let blockContext = '';
+    let output = '';
+
+    if (block.responseSource === 'thinkOutput') {
+      const priorOutputs = Object.values(this.executionState.blockOutputs)
+        .filter(o => o.blockId !== block.id)
+        .map(o => o.rawOutput)
+        .join('\n---\n');
+      output = priorOutputs || this.context.input;
+      blockContext = '[RESPONSE]: From prior Think output';
+    } else if (block.responseSource === 'toolResult') {
+      const toolOutputs = Object.values(this.executionState.blockOutputs)
+        .filter(o => o.toolCall)
+        .map(o => o.toolCall?.result)
+        .join('\n');
+      output = toolOutputs || 'No tool results available';
+      blockContext = '[RESPONSE]: From tool results';
+    } else if (block.responseSource === 'custom') {
+      output = block.responseGuidance || 'Custom response generated';
+      blockContext = '[RESPONSE]: Custom generated';
     }
 
-    const stepOutput: StepOutput = {
-      stepId: step.id,
-      rawOutput: combinedOutput,
-      includedInContext: step.includeInContext,
+    const blockOutput: BlockOutput = {
+      blockId: block.id,
+      rawOutput: output,
+      includedInContext: false,
       previousContext,
-      stepContext,
-      sentToNext,
+      blockContext,
     };
-    this.executionState.stepOutputs[step.id] = stepOutput;
+    this.executionState.blockOutputs[block.id] = blockOutput;
+
+    this.emit({
+      type: 'responseEmitted',
+      blockId: block.id,
+      data: { source: block.responseSource, visibility: block.visibilityMode, output },
+    });
 
     return {
-      stepId: step.id,
+      blockId: block.id,
       success: true,
-      output: combinedOutput,
+      output,
       duration: 0,
     };
   }
 
-  private evaluateLoopCondition(step: LoopStep, currentIteration: number): boolean {
-    switch (step.condition) {
-      case 'maxIterations':
-        return currentIteration < step.maxIterations;
-      case 'untilUserInput':
-        return false;
-      case 'untilToolSucceeds':
-        return false;
-      default:
-        return false;
-    }
+  private async executeStopBlock(block: StopBlock): Promise<BlockResult> {
+    const output = block.stopReason || 'Runtime completed';
+    
+    const blockOutput: BlockOutput = {
+      blockId: block.id,
+      rawOutput: output,
+      includedInContext: false,
+    };
+    this.executionState.blockOutputs[block.id] = blockOutput;
+
+    return {
+      blockId: block.id,
+      success: true,
+      output,
+      duration: 0,
+    };
   }
 
   reset() {

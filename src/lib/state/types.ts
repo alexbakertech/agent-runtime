@@ -368,7 +368,7 @@ export interface ValidationResult {
   warnings?: string[];
 }
 
-import { RuntimeSpec, RuntimeExecutionState, RuntimeStep } from '@/lib/runtime/spec/types';
+import { RuntimeSpec, RuntimeExecutionState, RuntimeBlock } from '@/lib/runtime/spec/types';
 
 /**
  * Runtime Spec page state.
@@ -387,8 +387,8 @@ export interface RuntimeSpecState {
   /** Current execution state for active runs */
   runtimeExecution: RuntimeExecutionState;
   
-  /** Step draft being edited (not yet saved) */
-  stepDraft: RuntimeStep | null;
+  /** Block draft being edited (not yet saved) */
+  blockDraft: RuntimeBlock | null;
   
   /** Whether the runtime is currently locked (running) */
   isLocked: boolean;

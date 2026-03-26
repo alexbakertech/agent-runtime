@@ -1,183 +1,264 @@
-export type StepType = 'prompt' | 'tool' | 'loop';
+export type BlockType = 'start' | 'think' | 'tool' | 'respond' | 'stop';
 
-export type PromptType = 'system' | 'user' | 'hidden';
+export type ThinkMode = 'decide' | 'draft' | 'summarize' | 'classify' | 'custom';
+export type OutputMode = 'freeform' | 'actionSelection' | 'structured';
 
-export type LoopCondition = 'maxIterations' | 'untilUserInput' | 'untilToolSucceeds';
+export type ToolAccessMode = 'fixed' | 'modelChoice';
+export type ArgumentSource = 'static' | 'dynamic' | 'mixed';
+export type ResultHandling = 'timeline' | 'blockOutput' | 'nextThink' | 'internal';
+export type FailureBehavior = 'continue' | 'retry' | 'routeBack' | 'stop';
 
-export interface BaseStep {
+export type ResponseSource = 'thinkOutput' | 'toolResult' | 'custom';
+export type VisibilityMode = 'final' | 'interim' | 'debug';
+
+export type RoutingMode = 'typeBased' | 'blockSpecific';
+
+export interface BaseBlock {
   id: string;
   name: string;
-  type: StepType;
+  type: BlockType;
   enabled: boolean;
-  locked: boolean;
-  includeInContext: boolean;
-  contextOutputMode: ContextOutputMode;
 }
 
-export interface PromptStep extends BaseStep {
-  type: 'prompt';
-  promptType: PromptType;
-  content: string;
-  injectionPosition: 'start' | 'end';
+export interface StartBlock extends BaseBlock {
+  type: 'start';
+  acceptsUserInput: boolean;
+  startupInstructions: string;
+  includeDefaults: boolean;
 }
 
-export type ToolStepMode = 'execute' | 'inject' | 'executeAndInject' | 'present' | 'forceExecute';
+export interface ThinkBlock extends BaseBlock {
+  type: 'think';
+  thinkMode: ThinkMode;
+  instructionText: string;
+  outputMode: OutputMode;
+  allowedNextActions: BlockType[];
+  routingMode: RoutingMode;
+  routingTargetId?: string;
+  contextSources: {
+    runtimeInstructions: boolean;
+    userInput: boolean;
+    priorBlockOutputs: boolean;
+    toolResults: boolean;
+    historySummary: boolean;
+  };
+}
 
-export type ContextOutputMode = 'all' | 'responseOnly' | 'thinkingOnly' | 'none';
-
-export interface ToolStep extends BaseStep {
+export interface ToolBlock extends BaseBlock {
   type: 'tool';
-  toolName: string;
-  toolStepMode: ToolStepMode;
-  toolRefStepId?: string;
-  autoExecute: boolean;
-  injectionPrompt: string;
-  continueOnFailure: boolean;
+  toolAccessMode: ToolAccessMode;
+  allowedTools: string[];
+  argumentSource: ArgumentSource;
+  staticArguments: Record<string, unknown>;
+  resultHandling: ResultHandling;
+  failureBehavior: FailureBehavior;
+  maxRetries: number;
 }
 
-export interface LoopStep extends BaseStep {
-  type: 'loop';
-  condition: LoopCondition;
-  maxIterations: number;
-  toolName?: string;
-  nestedSteps: RuntimeStep[];
-  continueOnFailure: boolean;
+export interface RespondBlock extends BaseBlock {
+  type: 'respond';
+  responseSource: ResponseSource;
+  responseGuidance: string;
+  visibilityMode: VisibilityMode;
 }
 
-export type RuntimeStep = PromptStep | ToolStep | LoopStep;
+export interface StopBlock extends BaseBlock {
+  type: 'stop';
+  stopReason: string;
+}
+
+export type RuntimeBlock = StartBlock | ThinkBlock | ToolBlock | RespondBlock | StopBlock;
 
 export interface RuntimeSpec {
   id: string;
   name: string;
   description: string;
-  steps: RuntimeStep[];
+  blocks: RuntimeBlock[];
+  runtimeDefaults?: {
+    globalInstructions: string;
+    defaultContextBehavior: string;
+    defaultHistoryBehavior: string;
+    defaultRunLimits: string;
+  };
   createdAt: string;
   updatedAt: string;
 }
 
-export type RuntimeStepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+export type RuntimeBlockStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 
-export interface StepOutput {
-  stepId: string;
+export interface BlockOutput {
+  blockId: string;
   rawOutput: string;
-  includedInContext: boolean;
   reasoning?: string;
+  includedInContext: boolean;
   previousContext?: string;
-  stepContext?: string;
+  blockContext?: string;
   sentToNext?: string;
+  toolCall?: {
+    toolName: string;
+    arguments: Record<string, unknown>;
+    result?: string;
+  };
 }
 
 export interface RuntimeExecutionState {
   runtimeSpecId: string | null;
   isRunning: boolean;
-  currentStepIndex: number;
-  currentIteration: number;
-  stepStatuses: Record<string, RuntimeStepStatus>;
-  results: Record<string, StepResult>;
-  stepOutputs: Record<string, StepOutput>;
-  stepContexts: Record<string, string>;
+  currentBlockIndex: number;
+  blockStatuses: Record<string, RuntimeBlockStatus>;
+  results: Record<string, BlockResult>;
+  blockOutputs: Record<string, BlockOutput>;
   currentInput: string;
-  isStepMode: boolean;
+  timeline: TimelineEvent[];
   startedAt: string | null;
   finishedAt: string | null;
 }
 
-export interface StepResult {
-  stepId: string;
+export interface BlockResult {
+  blockId: string;
   success: boolean;
   output?: string;
   error?: string;
   duration: number;
 }
 
+export interface TimelineEvent {
+  id: string;
+  timestamp: string;
+  type: 'blockStart' | 'blockComplete' | 'blockFailed' | 'toolExposed' | 'toolCalled' | 'toolResult' | 'responseEmitted' | 'runtimeStart' | 'runtimeComplete';
+  blockId?: string;
+  blockType?: BlockType;
+  data?: unknown;
+}
+
 export interface RuntimeEvent {
-  type: 'stepStart' | 'stepComplete' | 'stepFailed' | 'iterationStart' | 'iterationComplete' | 'runtimeStart' | 'runtimeComplete';
-  stepId?: string;
-  stepIndex?: number;
-  iteration?: number;
+  type: 'blockStart' | 'blockComplete' | 'blockFailed' | 'toolExposed' | 'toolCalled' | 'toolResult' | 'responseEmitted' | 'runtimeStart' | 'runtimeComplete';
+  blockId?: string;
+  blockIndex?: number;
   data?: unknown;
 }
 
 export type RuntimeEventHandler = (event: RuntimeEvent) => void;
 
-export function createStepId(): string {
-  return `step_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+export function createBlockId(): string {
+  return `block_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 }
 
 export function createSpecId(): string {
   return `runtime_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 }
 
-export function createDefaultPromptStep(): PromptStep {
+export function createDefaultStartBlock(): StartBlock {
   return {
-    id: createStepId(),
-    name: 'New Prompt Step',
-    type: 'prompt',
+    id: createBlockId(),
+    name: 'Start Run',
+    type: 'start',
     enabled: true,
-    locked: false,
-    promptType: 'system',
-    content: '',
-    injectionPosition: 'start',
-    includeInContext: true,
-    contextOutputMode: 'responseOnly',
+    acceptsUserInput: true,
+    startupInstructions: '',
+    includeDefaults: true,
   };
 }
 
-export function createDefaultToolStep(): ToolStep {
+export function createDefaultThinkBlock(): ThinkBlock {
   return {
-    id: createStepId(),
-    name: 'New Tool Step',
+    id: createBlockId(),
+    name: 'Think',
+    type: 'think',
+    enabled: true,
+    thinkMode: 'decide',
+    instructionText: '',
+    outputMode: 'freeform',
+    allowedNextActions: ['tool', 'respond', 'stop'],
+    routingMode: 'typeBased',
+    contextSources: {
+      runtimeInstructions: true,
+      userInput: true,
+      priorBlockOutputs: true,
+      toolResults: true,
+      historySummary: false,
+    },
+  };
+}
+
+export function createDefaultToolBlock(): ToolBlock {
+  return {
+    id: createBlockId(),
+    name: 'Use Tool',
     type: 'tool',
     enabled: true,
-    locked: false,
-    toolName: '',
-    toolStepMode: 'executeAndInject',
-    autoExecute: true,
-    injectionPrompt: 'Here are the tool results:\n{{results}}',
-    continueOnFailure: false,
-    includeInContext: true,
-    contextOutputMode: 'responseOnly',
+    toolAccessMode: 'fixed',
+    allowedTools: [],
+    argumentSource: 'static',
+    staticArguments: {},
+    resultHandling: 'nextThink',
+    failureBehavior: 'continue',
+    maxRetries: 1,
   };
 }
 
-export function createDefaultLoopStep(): LoopStep {
+export function createDefaultRespondBlock(): RespondBlock {
   return {
-    id: createStepId(),
-    name: 'New Loop Step',
-    type: 'loop',
+    id: createBlockId(),
+    name: 'Respond',
+    type: 'respond',
     enabled: true,
-    locked: false,
-    condition: 'maxIterations',
-    maxIterations: 5,
-    nestedSteps: [],
-    continueOnFailure: false,
-    includeInContext: true,
-    contextOutputMode: 'responseOnly',
+    responseSource: 'thinkOutput',
+    responseGuidance: '',
+    visibilityMode: 'final',
   };
 }
 
-export function createChatAgentRuntimeSpec(): RuntimeSpec {
-  const now = new Date().toISOString();
-  
-  const systemPromptStep: PromptStep = {
-    id: createStepId(),
-    name: 'System Prompt',
-    type: 'prompt',
+export function createDefaultStopBlock(): StopBlock {
+  return {
+    id: createBlockId(),
+    name: 'Stop',
+    type: 'stop',
     enabled: true,
-    locked: false,
-    promptType: 'system',
-    content: 'You are a helpful AI assistant. Answer concisely.',
-    injectionPosition: 'start',
-    includeInContext: true,
-    contextOutputMode: 'responseOnly',
+    stopReason: '',
   };
+}
+
+export function createDefaultRuntime(): RuntimeSpec {
+  const now = new Date().toISOString();
   
   return {
     id: createSpecId(),
-    name: 'Chat Agent',
-    description: 'Basic chat agent with system prompt and user input handling.',
-    steps: [systemPromptStep],
+    name: 'New Runtime',
+    description: '',
+    blocks: [
+      createDefaultStartBlock(),
+      createDefaultThinkBlock(),
+      createDefaultRespondBlock(),
+      createDefaultStopBlock(),
+    ],
+    runtimeDefaults: {
+      globalInstructions: '',
+      defaultContextBehavior: 'includeAll',
+      defaultHistoryBehavior: 'none',
+      defaultRunLimits: '',
+    },
     createdAt: now,
     updatedAt: now,
   };
+}
+
+export function getBlockTypeLabel(type: BlockType): string {
+  switch (type) {
+    case 'start': return 'Start Run';
+    case 'think': return 'Think';
+    case 'tool': return 'Use Tool';
+    case 'respond': return 'Respond';
+    case 'stop': return 'Stop';
+  }
+}
+
+export function getBlockTypeDescription(type: BlockType): string {
+  switch (type) {
+    case 'start': return 'Defines how a run begins.';
+    case 'think': return 'Asks the model to decide or draft.';
+    case 'tool': return 'Exposes a selected set of tools at this step.';
+    case 'respond': return 'Sends visible output to the user.';
+    case 'stop': return 'Ends the run.';
+  }
 }
