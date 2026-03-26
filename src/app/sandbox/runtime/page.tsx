@@ -156,7 +156,7 @@ export default function RuntimeBuilder() {
     let newBlock: RuntimeBlock;
     switch (type) {
       case 'start':
-        if (activeSpec.blocks.some(b => b.type === 'start')) return;
+        if ((activeSpec.blocks || []).some(b => b.type === 'start')) return;
         newBlock = createDefaultStartBlock();
         break;
       case 'think':
@@ -173,13 +173,13 @@ export default function RuntimeBuilder() {
         break;
     }
     
-    handleUpdateSpec({ blocks: [...activeSpec.blocks, newBlock] });
+    handleUpdateSpec({ blocks: [...(activeSpec.blocks || []), newBlock] });
   };
   
   const handleUpdateBlock = (blockId: string, updates: Partial<RuntimeBlock>) => {
     if (!activeSpec || isLocked) return;
     
-    const blocks = activeSpec.blocks.map(block =>
+    const blocks = (activeSpec.blocks || []).map(block =>
       block.id === blockId ? { ...block, ...updates } as RuntimeBlock : block
     );
     
@@ -189,18 +189,18 @@ export default function RuntimeBuilder() {
   const handleDeleteBlock = (blockId: string) => {
     if (!activeSpec || isLocked) return;
     
-    const block = activeSpec.blocks.find(b => b.id === blockId);
+    const block = (activeSpec.blocks || []).find(b => b.id === blockId);
     if (!block) return;
     if (block.type === 'start' || block.type === 'stop') return;
     
-    const blocks = activeSpec.blocks.filter(block => block.id !== blockId);
+    const blocks = (activeSpec.blocks || []).filter(block => block.id !== blockId);
     handleUpdateSpec({ blocks });
   };
   
   const handleDuplicateBlock = (blockId: string) => {
     if (!activeSpec || isLocked) return;
     
-    const block = activeSpec.blocks.find(b => b.id === blockId);
+    const block = (activeSpec.blocks || []).find(b => b.id === blockId);
     if (!block || block.type === 'start' || block.type === 'stop') return;
     
     let newBlock: RuntimeBlock;
@@ -220,8 +220,8 @@ export default function RuntimeBuilder() {
         return;
     }
     
-    const blockIndex = activeSpec.blocks.findIndex(b => b.id === blockId);
-    const newBlocks = [...activeSpec.blocks];
+    const blockIndex = (activeSpec.blocks || []).findIndex(b => b.id === blockId);
+    const newBlocks = [...(activeSpec.blocks || [])];
     newBlocks.splice(blockIndex + 1, 0, newBlock);
     handleUpdateSpec({ blocks: newBlocks });
   };
@@ -267,7 +267,7 @@ export default function RuntimeBuilder() {
       return;
     }
 
-    const newBlocks = [...activeSpec.blocks];
+    const newBlocks = [...(activeSpec.blocks || [])];
     const [removed] = newBlocks.splice(draggedItem.index, 1);
     newBlocks.splice(dragOverIndex, 0, removed);
 
@@ -334,7 +334,7 @@ export default function RuntimeBuilder() {
     setCurrentBlockIndex(-1);
 
     try {
-      for (let i = 0; i < activeSpec.blocks.length; i++) {
+      for (let i = 0; i < (activeSpec.blocks || []).length; i++) {
         const block = activeSpec.blocks[i];
         if (!block.enabled) continue;
 
@@ -420,7 +420,7 @@ export default function RuntimeBuilder() {
         id: `event_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
         timestamp: new Date().toISOString(),
         type: 'runtimeComplete',
-        data: { totalBlocks: activeSpec.blocks.length },
+        data: { totalBlocks: activeSpec.blocks?.length || 0 },
       };
       setTimeline(prev => [...prev, runtimeCompleteEvent]);
     } catch (err) {
@@ -932,9 +932,9 @@ export default function RuntimeBuilder() {
             </div>
             
             <div style={{ flex: 1 }}>
-              {activeSpec.blocks.map((block, index) => renderBlockCard(block, index))}
+              {(activeSpec.blocks || []).map((block, index) => renderBlockCard(block, index))}
               
-              {activeSpec.blocks.length === 0 && (
+              {(activeSpec.blocks?.length || 0) === 0 && (
                 <div style={{ textAlign: 'center', padding: '3rem', color: '#94a3b8', border: '2px dashed #e2e8f0', borderRadius: '8px' }}>
                   No blocks yet. Add a block to start building your runtime.
                 </div>
