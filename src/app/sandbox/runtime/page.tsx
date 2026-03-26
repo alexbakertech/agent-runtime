@@ -279,6 +279,11 @@ export default function RuntimeBuilder() {
   const validateRuntime = (spec: RuntimeSpec): string[] => {
     const errors: string[] = [];
     
+    if (!spec.blocks || spec.blocks.length === 0) {
+      errors.push('Runtime must have at least one block.');
+      return errors;
+    }
+    
     const hasStart = spec.blocks.some(b => b.type === 'start');
     const hasStop = spec.blocks.some(b => b.type === 'stop');
     
