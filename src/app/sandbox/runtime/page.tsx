@@ -80,6 +80,8 @@ export default function RuntimeBuilder() {
   const [selectedProfileId, setSelectedProfileId] = useState<string>('');
   const [executionResults, setExecutionResults] = useState<Record<string, BlockResult>>({});
   const [blockOutputs, setBlockOutputs] = useState<Record<string, { reasoning?: string; previousContext?: string; blockContext?: string; toolCall?: { name: string; arguments: Record<string, unknown>; result?: string } }>>({});
+  const [blockInputs, setBlockInputs] = useState<Record<string, { prompt: string; systemPrompt?: string; userMessage: string }>>({});
+  const [blockResponses, setBlockResponses] = useState<Record<string, { response: string; reasoning?: string; toolCalls?: Array<{ name: string; arguments: Record<string, unknown> }> }>>({});
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [currentBlockIndex, setCurrentBlockIndex] = useState(-1);
@@ -353,14 +355,20 @@ export default function RuntimeBuilder() {
 
   const validationErrors = activeSpec ? validateRuntime(activeSpec) : [];
 
+  const [selectedBlockForInspector, setSelectedBlockForInspector] = useState<string | null>(null);
+
   const handleRun = useCallback(async () => {
     if (!activeSpec || !activeProfile || validationErrors.length > 0) return;
 
     setIsRunning(true);
     setExecutionResults({});
     setBlockOutputs({});
+    setBlockInputs({});
+    setBlockResponses({});
     setTimeline([]);
     setCurrentBlockIndex(-1);
+
+    let accumulatedContext = '';
 
     try {
       for (let i = 0; i < (activeSpec.blocks || []).length; i++) {
@@ -383,6 +391,10 @@ export default function RuntimeBuilder() {
         let output = '';
         let reasoning: string | undefined;
         let toolCall: { name: string; arguments: Record<string, unknown>; result?: string } | undefined;
+        
+        let blockInputPrompt = '';
+        let blockResponseText = '';
+        let blockResponseReasoning: string | undefined;
 
         if (block.type === 'start') {
           const startBlock = block as StartBlock;
@@ -390,24 +402,55 @@ export default function RuntimeBuilder() {
           if (startBlock.startupInstructions) {
             output += `\nInstructions: ${startBlock.startupInstructions}`;
           }
+          blockInputPrompt = output;
+          blockResponseText = 'OK, ready to proceed.';
         } else if (block.type === 'think') {
           const thinkBlock = block as ThinkBlock;
-          reasoning = `Thinking about ${thinkBlock.thinkMode}...`;
+          const instructions = thinkBlock.instructionText || 'Decide what to do next.';
+          const availableActions = thinkBlock.allowedNextActions.join(', ');
+          const contextInfo = thinkBlock.contextSources.userInput ? `User said: ${userQuery}\n` : '';
+          const toolInfo = thinkBlock.contextSources.toolResults ? `Previous tool results available.\n` : '';
+          
+          blockInputPrompt = `[System: ${instructions}]\n${contextInfo}${toolInfo}Available actions: ${availableActions}\n\nWhat should I do?`;
+          blockResponseReasoning = `Analyzing request to determine next action from: ${availableActions}`;
+          reasoning = blockResponseReasoning;
           output = `Decision: proceed to ${thinkBlock.allowedNextActions.join(', ')}`;
+          blockResponseText = output;
+          
+          accumulatedContext += `\n---\nUser query: ${userQuery}\nAI: ${output}`;
         } else if (block.type === 'tool') {
           const toolBlock = block as ToolBlock;
           if (toolBlock.toolAccessMode === 'fixed' && toolBlock.allowedTools[0]) {
+            const toolName = toolBlock.allowedTools[0];
+            const args = JSON.stringify(toolBlock.staticArguments || {}, null, 2);
+            blockInputPrompt = `Use tool: ${toolName}\nArguments: ${args}\n\nExecute this tool call.`;
+            blockResponseReasoning = `Calling tool ${toolName} with provided arguments.`;
             toolCall = {
-              name: toolBlock.allowedTools[0],
+              name: toolName,
               arguments: toolBlock.staticArguments || {},
-              result: 'Tool executed successfully',
+              result: `Executed ${toolName} successfully.`,
             };
             output = `Tool result: ${toolCall.result}`;
+            blockResponseText = output;
+            reasoning = blockResponseReasoning;
           } else {
-            output = `Model chose from: ${toolBlock.allowedTools.join(', ')}`;
+            blockInputPrompt = `Available tools: ${toolBlock.allowedTools.join(', ')}\n\nChoose a tool to use.`;
+            blockResponseText = `Model chose from: ${toolBlock.allowedTools.join(', ')}`;
           }
         } else if (block.type === 'respond') {
           const respondBlock = block as RespondBlock;
+          blockInputPrompt = `Context:\n${accumulatedContext}\n\nCreate a user-facing response.`;
+          
+          if (respondBlock.responseSource === 'thinkOutput') {
+            blockResponseText = respondBlock.responseGuidance || `Based on the conversation: ${userQuery || 'No user input'}`;
+          } else if (respondBlock.responseSource === 'toolResult') {
+            blockResponseText = respondBlock.responseGuidance || 'Here are the results from the tool.';
+          } else {
+            blockResponseText = respondBlock.responseGuidance || 'Custom response generated.';
+          }
+          output = blockResponseText;
+          reasoning = 'Generating user-facing response.';
+          
           const responseEvent: TimelineEvent = {
             id: `event_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
             timestamp: new Date().toISOString(),
@@ -417,12 +460,9 @@ export default function RuntimeBuilder() {
             data: { source: respondBlock.responseSource, visibility: respondBlock.visibilityMode },
           };
           setTimeline(prev => [...prev, responseEvent]);
-          output = respondBlock.responseSource === 'thinkOutput' 
-            ? 'Response from Think output' 
-            : respondBlock.responseSource === 'toolResult'
-              ? 'Response from Tool result'
-              : respondBlock.responseGuidance || 'Custom response';
         } else if (block.type === 'stop') {
+          blockInputPrompt = 'Runtime complete. End the session.';
+          blockResponseText = 'Runtime stopped.';
           output = 'Runtime stopped';
         }
 
@@ -442,6 +482,8 @@ export default function RuntimeBuilder() {
             toolCall 
           } 
         }));
+        setBlockInputs(prev => ({ ...prev, [block.id]: { prompt: blockInputPrompt, userMessage: userQuery || '' } }));
+        setBlockResponses(prev => ({ ...prev, [block.id]: { response: blockResponseText, reasoning: blockResponseReasoning } }));
 
         const completeEvent: TimelineEvent = {
           id: `event_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
@@ -1025,9 +1067,9 @@ export default function RuntimeBuilder() {
         )}
       </main>
       
-      <aside style={{ width: '320px', backgroundColor: '#fafafa', borderLeft: '1px solid #e2e8f0', padding: '1rem', overflowY: 'auto' }}>
+      <aside style={{ width: '340px', backgroundColor: '#fafafa', borderLeft: '1px solid #e2e8f0', padding: '1rem', overflowY: 'auto' }}>
         <h3 style={{ fontSize: '0.8rem', fontWeight: 700, color: '#64748b', marginBottom: '1rem' }}>
-          EXECUTION INSPECTOR
+          CONTEXT INSPECTOR
         </h3>
         
         {isRunning && (
@@ -1038,40 +1080,109 @@ export default function RuntimeBuilder() {
         
         {timeline.length === 0 && !isRunning && (
           <div style={{ textAlign: 'center', padding: '2rem 1rem', color: '#94a3b8', fontSize: '0.8rem' }}>
-            Run the runtime to see execution timeline.
+            Run the runtime to see context inspector.
           </div>
         )}
         
         {timeline.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            {timeline.map((event, i) => (
-              <div
-                key={event.id}
-                style={{
-                  padding: '0.5rem 0.75rem',
-                  backgroundColor: event.type === 'runtimeComplete' ? '#dcfce7' : event.type === 'blockFailed' ? '#fef2f2' : '#fff',
-                  borderRadius: '4px',
-                  border: '1px solid #e2e8f0',
-                  fontSize: '0.75rem',
-                }}
-              >
-                <div style={{ fontWeight: 600, color: '#374151', marginBottom: '0.25rem' }}>
-                  {event.type === 'runtimeStart' && '▶ Runtime Started'}
-                  {event.type === 'blockStart' && `▶ ${getBlockTypeLabel(event.blockType!)} started`}
-                  {event.type === 'blockComplete' && `✓ ${getBlockTypeLabel(event.blockType!)} completed`}
-                  {event.type === 'blockFailed' && '✗ Block failed'}
-                  {event.type === 'toolExposed' && '🔧 Tools exposed'}
-                  {event.type === 'toolCalled' && '🔧 Tool called'}
-                  {event.type === 'toolResult' && '🔧 Tool result received'}
-                  {event.type === 'responseEmitted' && '💬 Response emitted'}
-                  {event.type === 'runtimeComplete' && '✓ Runtime complete'}
-                </div>
-                <div style={{ color: '#64748b', fontSize: '0.7rem' }}>
-                  {new Date(event.timestamp).toLocaleTimeString()}
-                </div>
+          <>
+            <div style={{ marginBottom: '1rem' }}>
+              <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', marginBottom: '0.5rem' }}>Select Block:</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                {activeSpec?.blocks.filter(b => b.enabled).map(block => (
+                  <button
+                    key={block.id}
+                    onClick={() => setSelectedBlockForInspector(block.id)}
+                    style={{
+                      padding: '0.5rem',
+                      textAlign: 'left',
+                      backgroundColor: selectedBlockForInspector === block.id ? '#dbeafe' : '#fff',
+                      border: selectedBlockForInspector === block.id ? '1px solid #3b82f6' : '1px solid #e2e8f0',
+                      borderRadius: '4px',
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <span style={{ fontWeight: 600 }}>{getBlockTypeLabel(block.type)}</span>: {block.name}
+                  </button>
+                ))}
               </div>
-            ))}
-          </div>
+            </div>
+            
+            {selectedBlockForInspector && blockInputs[selectedBlockForInspector] && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <CollapsibleSection title="Input: Prompt to Model" defaultExpanded={true}>
+                  <div style={{ padding: '0.75rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+                    <pre style={{ fontFamily: 'monospace', fontSize: '0.7rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0, maxHeight: '150px', overflowY: 'auto' }}>
+{blockInputs[selectedBlockForInspector].prompt}
+                    </pre>
+                  </div>
+                </CollapsibleSection>
+                
+                <CollapsibleSection title="Input: User Message" defaultExpanded={false}>
+                  <div style={{ padding: '0.75rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+                    <pre style={{ fontFamily: 'monospace', fontSize: '0.7rem', whiteSpace: 'pre-wrap', margin: 0 }}>
+{blockInputs[selectedBlockForInspector].userMessage || '(none)'}
+                    </pre>
+                  </div>
+                </CollapsibleSection>
+                
+                <CollapsibleSection title="Output: Model Response" defaultExpanded={true}>
+                  <div style={{ padding: '0.75rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+                    <pre style={{ fontFamily: 'monospace', fontSize: '0.7rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0, maxHeight: '150px', overflowY: 'auto' }}>
+{blockResponses[selectedBlockForInspector]?.response || '(no response)'}
+                    </pre>
+                  </div>
+                </CollapsibleSection>
+                
+                {blockResponses[selectedBlockForInspector]?.reasoning && (
+                  <CollapsibleSection title="Output: Reasoning/Thinking" defaultExpanded={false}>
+                    <div style={{ padding: '0.75rem', backgroundColor: '#fef3c7', borderRadius: '4px', border: '1px solid #fcd34d' }}>
+                      <pre style={{ fontFamily: 'monospace', fontSize: '0.7rem', whiteSpace: 'pre-wrap', margin: 0 }}>
+{blockResponses[selectedBlockForInspector].reasoning}
+                      </pre>
+                    </div>
+                  </CollapsibleSection>
+                )}
+                
+                {blockOutputs[selectedBlockForInspector]?.toolCall && (
+                  <CollapsibleSection title="Tool Call Details" defaultExpanded={true}>
+                    <div style={{ padding: '0.75rem', backgroundColor: '#dcfce7', borderRadius: '4px', border: '1px solid #86efac' }}>
+                      <div style={{ fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.5rem' }}>Tool: {blockOutputs[selectedBlockForInspector].toolCall?.name}</div>
+                      <div style={{ fontSize: '0.7rem', marginBottom: '0.25rem' }}><strong>Arguments:</strong></div>
+                      <pre style={{ fontFamily: 'monospace', fontSize: '0.65rem', whiteSpace: 'pre-wrap', margin: '0 0 0.5rem 0', backgroundColor: '#fff', padding: '0.25rem', borderRadius: '2px' }}>
+{JSON.stringify(blockOutputs[selectedBlockForInspector].toolCall?.arguments, null, 2)}
+                      </pre>
+                      {blockOutputs[selectedBlockForInspector].toolCall?.result && (
+                        <>
+                          <div style={{ fontSize: '0.7rem', marginBottom: '0.25rem' }}><strong>Result:</strong></div>
+                          <pre style={{ fontFamily: 'monospace', fontSize: '0.65rem', whiteSpace: 'pre-wrap', margin: 0, backgroundColor: '#fff', padding: '0.25rem', borderRadius: '2px' }}>
+{blockOutputs[selectedBlockForInspector].toolCall?.result}
+                          </pre>
+                        </>
+                      )}
+                    </div>
+                  </CollapsibleSection>
+                )}
+                
+                {blockOutputs[selectedBlockForInspector]?.blockContext && (
+                  <CollapsibleSection title="Block Context" defaultExpanded={false}>
+                    <div style={{ padding: '0.75rem', backgroundColor: '#f1f5f9', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+                      <pre style={{ fontFamily: 'monospace', fontSize: '0.7rem', whiteSpace: 'pre-wrap', margin: 0 }}>
+{blockOutputs[selectedBlockForInspector].blockContext}
+                      </pre>
+                    </div>
+                  </CollapsibleSection>
+                )}
+              </div>
+            )}
+            
+            {!selectedBlockForInspector && (
+              <div style={{ textAlign: 'center', padding: '1rem', color: '#94a3b8', fontSize: '0.75rem' }}>
+                Click a block above to inspect its input/output
+              </div>
+            )}
+          </>
         )}
       </aside>
     </div>
