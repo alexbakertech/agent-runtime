@@ -42,6 +42,35 @@ interface DragItem {
   id: string;
 }
 
+function CollapsibleSection({ title, children, defaultExpanded = true }: { title: string; children: React.ReactNode; defaultExpanded?: boolean }) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  
+  return (
+    <div style={{ borderTop: '1px solid #e2e8f0' }}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        style={{
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '0.5rem 1rem',
+          backgroundColor: '#f1f5f9',
+          border: 'none',
+          cursor: 'pointer',
+          fontSize: '0.75rem',
+          fontWeight: 600,
+          color: '#475569',
+        }}
+      >
+        <span>▶ {title}</span>
+        <span>{expanded ? '▼' : '▶'}</span>
+      </button>
+      {expanded && <div>{children}</div>}
+    </div>
+  );
+}
+
 export default function RuntimeBuilder() {
   const { runtimeSpec, updateRuntimeSpec } = useRuntimeSpec();
   const { profiles, activeProfile, setActiveProfile } = useProfiles();
@@ -50,7 +79,7 @@ export default function RuntimeBuilder() {
   const [userQuery, setUserQuery] = useState('');
   const [selectedProfileId, setSelectedProfileId] = useState<string>('');
   const [executionResults, setExecutionResults] = useState<Record<string, BlockResult>>({});
-  const [blockOutputs, setBlockOutputs] = useState<Record<string, { reasoning?: string; context?: string; toolCall?: { name: string; args: Record<string, unknown>; result?: string } }>>({});
+  const [blockOutputs, setBlockOutputs] = useState<Record<string, { reasoning?: string; previousContext?: string; blockContext?: string; toolCall?: { name: string; arguments: Record<string, unknown>; result?: string } }>>({});
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [currentBlockIndex, setCurrentBlockIndex] = useState(-1);
@@ -353,7 +382,7 @@ export default function RuntimeBuilder() {
 
         let output = '';
         let reasoning: string | undefined;
-        let toolCall: { name: string; args: Record<string, unknown>; result?: string } | undefined;
+        let toolCall: { name: string; arguments: Record<string, unknown>; result?: string } | undefined;
 
         if (block.type === 'start') {
           const startBlock = block as StartBlock;
@@ -370,7 +399,7 @@ export default function RuntimeBuilder() {
           if (toolBlock.toolAccessMode === 'fixed' && toolBlock.allowedTools[0]) {
             toolCall = {
               name: toolBlock.allowedTools[0],
-              args: toolBlock.staticArguments || {},
+              arguments: toolBlock.staticArguments || {},
               result: 'Tool executed successfully',
             };
             output = `Tool result: ${toolCall.result}`;
@@ -404,7 +433,15 @@ export default function RuntimeBuilder() {
           duration: 300,
         };
         setExecutionResults(prev => ({ ...prev, [block.id]: result }));
-        setBlockOutputs(prev => ({ ...prev, [block.id]: { reasoning, toolCall } }));
+        setBlockOutputs(prev => ({ 
+          ...prev, 
+          [block.id]: { 
+            reasoning, 
+            previousContext: block.type === 'think' ? `User: ${userQuery}` : undefined,
+            blockContext: block.type === 'start' ? output : undefined,
+            toolCall 
+          } 
+        }));
 
         const completeEvent: TimelineEvent = {
           id: `event_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
@@ -652,16 +689,55 @@ export default function RuntimeBuilder() {
         )}
 
         {executionResults[block.id] && (
-          <div style={{ borderTop: '1px solid #e2e8f0', padding: '0.75rem 1rem', fontSize: '0.8rem', backgroundColor: '#fafafa' }}>
-            <div style={{ fontWeight: 600, color: '#374151', marginBottom: '0.25rem' }}>Output:</div>
-            <div style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', padding: '0.5rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
-              {executionResults[block.id].output || '(no output)'}
+          <div style={{ borderTop: '1px solid #e2e8f0' }}>
+            <div style={{ padding: '0.75rem 1rem', fontSize: '0.8rem', backgroundColor: '#fafafa' }}>
+              <div style={{ fontWeight: 600, color: '#374151', marginBottom: '0.25rem' }}>Output:</div>
+              <div style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', padding: '0.5rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0', maxHeight: '150px', overflowY: 'auto' }}>
+                {executionResults[block.id].output || '(no output)'}
+              </div>
+              {blockOutputs[block.id]?.reasoning && (
+                <div style={{ marginTop: '0.5rem' }}>
+                  <div style={{ fontWeight: 600, color: '#92400e', marginBottom: '0.25rem' }}>Thinking:</div>
+                  <div style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', padding: '0.5rem', backgroundColor: '#fef3c7', borderRadius: '4px', fontSize: '0.75rem', color: '#78350f', maxHeight: '100px', overflowY: 'auto' }}>
+                    {blockOutputs[block.id].reasoning}
+                  </div>
+                </div>
+              )}
             </div>
-            {blockOutputs[block.id]?.reasoning && (
-              <div style={{ marginTop: '0.5rem' }}>
-                <div style={{ fontWeight: 600, color: '#92400e', marginBottom: '0.25rem' }}>Thinking:</div>
-                <div style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', padding: '0.5rem', backgroundColor: '#fef3c7', borderRadius: '4px', fontSize: '0.75rem', color: '#78350f' }}>
-                  {blockOutputs[block.id].reasoning}
+            
+            <CollapsibleSection title="Context to Model" defaultExpanded={false}>
+              <div style={{ padding: '0.75rem', fontSize: '0.75rem', backgroundColor: '#f8fafc' }}>
+                {blockOutputs[block.id]?.previousContext && (
+                  <div style={{ marginBottom: '0.75rem' }}>
+                    <div style={{ fontWeight: 600, color: '#64748b', marginBottom: '0.25rem' }}>Previous Context:</div>
+                    <pre style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', fontSize: '0.7rem', padding: '0.5rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0', maxHeight: '120px', overflowY: 'auto', margin: 0 }}>
+{JSON.stringify(blockOutputs[block.id].previousContext, null, 2)}
+                    </pre>
+                  </div>
+                )}
+                {blockOutputs[block.id]?.blockContext && (
+                  <div style={{ marginBottom: '0.5rem' }}>
+                    <div style={{ fontWeight: 600, color: '#64748b', marginBottom: '0.25rem' }}>Block Context:</div>
+                    <pre style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', fontSize: '0.7rem', padding: '0.5rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0', maxHeight: '120px', overflowY: 'auto', margin: 0 }}>
+{blockOutputs[block.id].blockContext}
+                    </pre>
+                  </div>
+                )}
+                {!blockOutputs[block.id]?.previousContext && !blockOutputs[block.id]?.blockContext && (
+                  <div style={{ color: '#94a3b8', fontStyle: 'italic' }}>No context data available</div>
+                )}
+              </div>
+            </CollapsibleSection>
+
+            {blockOutputs[block.id]?.toolCall && (
+              <div style={{ borderTop: '1px solid #e2e8f0', padding: '0.75rem 1rem', fontSize: '0.8rem', backgroundColor: '#f0fdf4' }}>
+                <div style={{ fontWeight: 600, color: '#166534', marginBottom: '0.5rem' }}>Tool Call:</div>
+                <div style={{ fontFamily: 'monospace', fontSize: '0.75rem' }}>
+                  <div><strong>Tool:</strong> {blockOutputs[block.id].toolCall?.name}</div>
+                  <div><strong>Arguments:</strong> {JSON.stringify(blockOutputs[block.id].toolCall?.arguments, null, 2)}</div>
+                  {blockOutputs[block.id].toolCall?.result && (
+                    <div style={{ marginTop: '0.5rem' }}><strong>Result:</strong> {blockOutputs[block.id].toolCall?.result}</div>
+                  )}
                 </div>
               </div>
             )}
