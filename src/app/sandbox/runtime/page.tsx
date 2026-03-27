@@ -82,6 +82,7 @@ export default function RuntimeBuilder() {
   const [blockOutputs, setBlockOutputs] = useState<Record<string, { reasoning?: string; previousContext?: string; blockContext?: string; toolCall?: { name: string; arguments: Record<string, unknown>; result?: string } }>>({});
   const [blockInputs, setBlockInputs] = useState<Record<string, { prompt: string; systemPrompt?: string; userMessage: string }>>({});
   const [blockResponses, setBlockResponses] = useState<Record<string, { response: string; reasoning?: string; toolCalls?: Array<{ name: string; arguments: Record<string, unknown> }> }>>({});
+  const [rawContextLog, setRawContextLog] = useState<Array<{ timestamp: string; direction: 'sent' | 'received'; content: string; source: string }>>([]);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [currentBlockIndex, setCurrentBlockIndex] = useState(-1);
@@ -356,6 +357,7 @@ export default function RuntimeBuilder() {
   const validationErrors = activeSpec ? validateRuntime(activeSpec) : [];
 
   const [selectedBlockForInspector, setSelectedBlockForInspector] = useState<string | null>(null);
+  const [inspectorMode, setInspectorMode] = useState<'block' | 'raw'>('raw');
 
   const handleRun = useCallback(async () => {
     if (!activeSpec || !activeProfile || validationErrors.length > 0) return;
@@ -365,6 +367,7 @@ export default function RuntimeBuilder() {
     setBlockOutputs({});
     setBlockInputs({});
     setBlockResponses({});
+    setRawContextLog([]);
     setTimeline([]);
     setCurrentBlockIndex(-1);
 
@@ -484,6 +487,11 @@ export default function RuntimeBuilder() {
         }));
         setBlockInputs(prev => ({ ...prev, [block.id]: { prompt: blockInputPrompt, userMessage: userQuery || '' } }));
         setBlockResponses(prev => ({ ...prev, [block.id]: { response: blockResponseText, reasoning: blockResponseReasoning } }));
+        
+        setRawContextLog(prev => [...prev, 
+          { timestamp: new Date().toISOString(), direction: 'sent', content: blockInputPrompt, source: `${getBlockTypeLabel(block.type)} Input` },
+          { timestamp: new Date().toISOString(), direction: 'received', content: blockResponseText, source: `${getBlockTypeLabel(block.type)} Output` }
+        ]);
 
         const completeEvent: TimelineEvent = {
           id: `event_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
@@ -1086,100 +1094,161 @@ export default function RuntimeBuilder() {
         
         {timeline.length > 0 && (
           <>
-            <div style={{ marginBottom: '1rem' }}>
-              <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', marginBottom: '0.5rem' }}>Select Block:</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                {activeSpec?.blocks.filter(b => b.enabled).map(block => (
-                  <button
-                    key={block.id}
-                    onClick={() => setSelectedBlockForInspector(block.id)}
-                    style={{
-                      padding: '0.5rem',
-                      textAlign: 'left',
-                      backgroundColor: selectedBlockForInspector === block.id ? '#dbeafe' : '#fff',
-                      border: selectedBlockForInspector === block.id ? '1px solid #3b82f6' : '1px solid #e2e8f0',
-                      borderRadius: '4px',
-                      fontSize: '0.75rem',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <span style={{ fontWeight: 600 }}>{getBlockTypeLabel(block.type)}</span>: {block.name}
-                  </button>
-                ))}
-              </div>
+            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+              <button
+                onClick={() => setInspectorMode('block')}
+                style={{
+                  flex: 1,
+                  padding: '0.5rem',
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  backgroundColor: inspectorMode === 'block' ? '#3b82f6' : '#fff',
+                  color: inspectorMode === 'block' ? '#fff' : '#64748b',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                }}
+              >
+                Block View
+              </button>
+              <button
+                onClick={() => setInspectorMode('raw')}
+                style={{
+                  flex: 1,
+                  padding: '0.5rem',
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  backgroundColor: inspectorMode === 'raw' ? '#3b82f6' : '#fff',
+                  color: inspectorMode === 'raw' ? '#fff' : '#64748b',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                }}
+              >
+                Raw Context
+              </button>
             </div>
             
-            {selectedBlockForInspector && blockInputs[selectedBlockForInspector] && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                <CollapsibleSection title="Input: Prompt to Model" defaultExpanded={true}>
-                  <div style={{ padding: '0.75rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
-                    <pre style={{ fontFamily: 'monospace', fontSize: '0.7rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0, maxHeight: '150px', overflowY: 'auto' }}>
+            {inspectorMode === 'block' && (
+              <>
+                <div style={{ marginBottom: '1rem' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', marginBottom: '0.5rem' }}>Select Block:</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    {activeSpec?.blocks.filter(b => b.enabled).map(block => (
+                      <button
+                        key={block.id}
+                        onClick={() => setSelectedBlockForInspector(block.id)}
+                        style={{
+                          padding: '0.5rem',
+                          textAlign: 'left',
+                          backgroundColor: selectedBlockForInspector === block.id ? '#dbeafe' : '#fff',
+                          border: selectedBlockForInspector === block.id ? '1px solid #3b82f6' : '1px solid #e2e8f0',
+                          borderRadius: '4px',
+                          fontSize: '0.75rem',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <span style={{ fontWeight: 600 }}>{getBlockTypeLabel(block.type)}</span>: {block.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                
+                {selectedBlockForInspector && blockInputs[selectedBlockForInspector] && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    <CollapsibleSection title="Input: Prompt to Model" defaultExpanded={true}>
+                      <div style={{ padding: '0.75rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+                        <pre style={{ fontFamily: 'monospace', fontSize: '0.7rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0, maxHeight: '150px', overflowY: 'auto' }}>
 {blockInputs[selectedBlockForInspector].prompt}
-                    </pre>
-                  </div>
-                </CollapsibleSection>
-                
-                <CollapsibleSection title="Input: User Message" defaultExpanded={false}>
-                  <div style={{ padding: '0.75rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
-                    <pre style={{ fontFamily: 'monospace', fontSize: '0.7rem', whiteSpace: 'pre-wrap', margin: 0 }}>
+                        </pre>
+                      </div>
+                    </CollapsibleSection>
+                    
+                    <CollapsibleSection title="Input: User Message" defaultExpanded={false}>
+                      <div style={{ padding: '0.75rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+                        <pre style={{ fontFamily: 'monospace', fontSize: '0.7rem', whiteSpace: 'pre-wrap', margin: 0 }}>
 {blockInputs[selectedBlockForInspector].userMessage || '(none)'}
-                    </pre>
-                  </div>
-                </CollapsibleSection>
-                
-                <CollapsibleSection title="Output: Model Response" defaultExpanded={true}>
-                  <div style={{ padding: '0.75rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
-                    <pre style={{ fontFamily: 'monospace', fontSize: '0.7rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0, maxHeight: '150px', overflowY: 'auto' }}>
+                        </pre>
+                      </div>
+                    </CollapsibleSection>
+                    
+                    <CollapsibleSection title="Output: Model Response" defaultExpanded={true}>
+                      <div style={{ padding: '0.75rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+                        <pre style={{ fontFamily: 'monospace', fontSize: '0.7rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0, maxHeight: '150px', overflowY: 'auto' }}>
 {blockResponses[selectedBlockForInspector]?.response || '(no response)'}
-                    </pre>
-                  </div>
-                </CollapsibleSection>
-                
-                {blockResponses[selectedBlockForInspector]?.reasoning && (
-                  <CollapsibleSection title="Output: Reasoning/Thinking" defaultExpanded={false}>
-                    <div style={{ padding: '0.75rem', backgroundColor: '#fef3c7', borderRadius: '4px', border: '1px solid #fcd34d' }}>
-                      <pre style={{ fontFamily: 'monospace', fontSize: '0.7rem', whiteSpace: 'pre-wrap', margin: 0 }}>
+                        </pre>
+                      </div>
+                    </CollapsibleSection>
+                    
+                    {blockResponses[selectedBlockForInspector]?.reasoning && (
+                      <CollapsibleSection title="Output: Reasoning/Thinking" defaultExpanded={false}>
+                        <div style={{ padding: '0.75rem', backgroundColor: '#fef3c7', borderRadius: '4px', border: '1px solid #fcd34d' }}>
+                          <pre style={{ fontFamily: 'monospace', fontSize: '0.7rem', whiteSpace: 'pre-wrap', margin: 0 }}>
 {blockResponses[selectedBlockForInspector].reasoning}
-                      </pre>
-                    </div>
-                  </CollapsibleSection>
-                )}
-                
-                {blockOutputs[selectedBlockForInspector]?.toolCall && (
-                  <CollapsibleSection title="Tool Call Details" defaultExpanded={true}>
-                    <div style={{ padding: '0.75rem', backgroundColor: '#dcfce7', borderRadius: '4px', border: '1px solid #86efac' }}>
-                      <div style={{ fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.5rem' }}>Tool: {blockOutputs[selectedBlockForInspector].toolCall?.name}</div>
-                      <div style={{ fontSize: '0.7rem', marginBottom: '0.25rem' }}><strong>Arguments:</strong></div>
-                      <pre style={{ fontFamily: 'monospace', fontSize: '0.65rem', whiteSpace: 'pre-wrap', margin: '0 0 0.5rem 0', backgroundColor: '#fff', padding: '0.25rem', borderRadius: '2px' }}>
-{JSON.stringify(blockOutputs[selectedBlockForInspector].toolCall?.arguments, null, 2)}
-                      </pre>
-                      {blockOutputs[selectedBlockForInspector].toolCall?.result && (
-                        <>
-                          <div style={{ fontSize: '0.7rem', marginBottom: '0.25rem' }}><strong>Result:</strong></div>
-                          <pre style={{ fontFamily: 'monospace', fontSize: '0.65rem', whiteSpace: 'pre-wrap', margin: 0, backgroundColor: '#fff', padding: '0.25rem', borderRadius: '2px' }}>
-{blockOutputs[selectedBlockForInspector].toolCall?.result}
                           </pre>
-                        </>
-                      )}
-                    </div>
-                  </CollapsibleSection>
+                        </div>
+                      </CollapsibleSection>
+                    )}
+                    
+                    {blockOutputs[selectedBlockForInspector]?.toolCall && (
+                      <CollapsibleSection title="Tool Call Details" defaultExpanded={true}>
+                        <div style={{ padding: '0.75rem', backgroundColor: '#dcfce7', borderRadius: '4px', border: '1px solid #86efac' }}>
+                          <div style={{ fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.5rem' }}>Tool: {blockOutputs[selectedBlockForInspector].toolCall?.name}</div>
+                          <div style={{ fontSize: '0.7rem', marginBottom: '0.25rem' }}><strong>Arguments:</strong></div>
+                          <pre style={{ fontFamily: 'monospace', fontSize: '0.65rem', whiteSpace: 'pre-wrap', margin: '0 0 0.5rem 0', backgroundColor: '#fff', padding: '0.25rem', borderRadius: '2px' }}>
+{JSON.stringify(blockOutputs[selectedBlockForInspector].toolCall?.arguments, null, 2)}
+                          </pre>
+                          {blockOutputs[selectedBlockForInspector].toolCall?.result && (
+                            <>
+                              <div style={{ fontSize: '0.7rem', marginBottom: '0.25rem' }}><strong>Result:</strong></div>
+                              <pre style={{ fontFamily: 'monospace', fontSize: '0.65rem', whiteSpace: 'pre-wrap', margin: 0, backgroundColor: '#fff', padding: '0.25rem', borderRadius: '2px' }}>
+{blockOutputs[selectedBlockForInspector].toolCall?.result}
+                              </pre>
+                            </>
+                          )}
+                        </div>
+                      </CollapsibleSection>
+                    )}
+                  </div>
                 )}
                 
-                {blockOutputs[selectedBlockForInspector]?.blockContext && (
-                  <CollapsibleSection title="Block Context" defaultExpanded={false}>
-                    <div style={{ padding: '0.75rem', backgroundColor: '#f1f5f9', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
-                      <pre style={{ fontFamily: 'monospace', fontSize: '0.7rem', whiteSpace: 'pre-wrap', margin: 0 }}>
-{blockOutputs[selectedBlockForInspector].blockContext}
-                      </pre>
-                    </div>
-                  </CollapsibleSection>
+                {!selectedBlockForInspector && (
+                  <div style={{ textAlign: 'center', padding: '1rem', color: '#94a3b8', fontSize: '0.75rem' }}>
+                    Click a block above to inspect its input/output
+                  </div>
                 )}
-              </div>
+              </>
             )}
             
-            {!selectedBlockForInspector && (
-              <div style={{ textAlign: 'center', padding: '1rem', color: '#94a3b8', fontSize: '0.75rem' }}>
-                Click a block above to inspect its input/output
+            {inspectorMode === 'raw' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {rawContextLog.map((entry, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      padding: '0.75rem',
+                      backgroundColor: entry.direction === 'sent' ? '#dbeafe' : '#dcfce7',
+                      borderRadius: '4px',
+                      border: `1px solid ${entry.direction === 'sent' ? '#93c5fd' : '#86efac'}`,
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                      <span style={{ fontSize: '0.7rem', fontWeight: 700, color: entry.direction === 'sent' ? '#1d4ed8' : '#166534' }}>
+                        {entry.direction === 'sent' ? '📤 SENT TO AI' : '📥 RECEIVED FROM AI'}
+                      </span>
+                      <span style={{ fontSize: '0.65rem', color: '#64748b' }}>{entry.source}</span>
+                    </div>
+                    <pre style={{ fontFamily: 'monospace', fontSize: '0.65rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0, maxHeight: '120px', overflowY: 'auto' }}>
+{entry.content}
+                    </pre>
+                  </div>
+                ))}
+                
+                {rawContextLog.length === 0 && (
+                  <div style={{ textAlign: 'center', padding: '1rem', color: '#94a3b8', fontSize: '0.75rem' }}>
+                    No context logged yet.
+                  </div>
+                )}
               </div>
             )}
           </>
