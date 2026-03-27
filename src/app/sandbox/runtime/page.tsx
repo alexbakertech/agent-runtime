@@ -357,7 +357,7 @@ export default function RuntimeBuilder() {
   const validationErrors = activeSpec ? validateRuntime(activeSpec) : [];
 
   const [selectedBlockForInspector, setSelectedBlockForInspector] = useState<string | null>(null);
-  const [inspectorMode, setInspectorMode] = useState<'block' | 'raw'>('raw');
+  const [inspectorMode, setInspectorMode] = useState<'block' | 'state' | 'raw'>('state');
 
   const handleRun = useCallback(async () => {
     if (!activeSpec || !activeProfile || validationErrors.length > 0) return;
@@ -705,76 +705,77 @@ export default function RuntimeBuilder() {
         )}
 
         {!isExpanded && (
-          <div style={{ padding: '0.5rem 1rem', fontSize: '0.75rem', color: '#64748b', backgroundColor: '#fafafa' }}>
-            {block.type === 'start' && (
-              <>
-                {(block as StartBlock).acceptsUserInput ? 'Accepts user input' : 'No user input'} 
-                {(block as StartBlock).startupInstructions ? ' • Has instructions' : ''}
-              </>
-            )}
-            {block.type === 'think' && (
-              <>
-                Mode: {(block as ThinkBlock).thinkMode} • 
-                Next: {(block as ThinkBlock).allowedNextActions.map(a => getBlockTypeLabel(a)).join(', ')}
-              </>
-            )}
-            {block.type === 'tool' && (
-              <>
-                {(block as ToolBlock).toolAccessMode === 'fixed' ? 'Fixed tool' : 'Model chooses'} • 
-                {(block as ToolBlock).allowedTools.length} tool(s)
-              </>
-            )}
-            {block.type === 'respond' && (
-              <>
-                Source: {(block as RespondBlock).responseSource} • 
-                {(block as RespondBlock).visibilityMode}
-              </>
-            )}
-            {block.type === 'stop' && (
-              <>
-                {(block as StopBlock).stopReason || 'End of runtime'}
-              </>
-            )}
+          <div style={{ padding: '0.75rem 1rem', fontSize: '0.75rem', backgroundColor: '#fafafa' }}>
+            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+              <div>
+                <span style={{ color: '#64748b' }}>Reads: </span>
+                {block.type === 'start' && <span>User Input, Runtime Defaults</span>}
+                {block.type === 'think' && (
+                  <span>{(block as ThinkBlock).contextSources.userInput ? 'User Input, ' : ''}{(block as ThinkBlock).contextSources.runtimeInstructions ? 'Runtime Instructions, ' : ''}{(block as ThinkBlock).contextSources.toolResults ? 'Tool Results, ' : ''}{(block as ThinkBlock).contextSources.priorBlockOutputs ? 'Prior Outputs' : ''}</span>
+                )}
+                {block.type === 'tool' && <span>Tool Args, Previous State</span>}
+                {block.type === 'respond' && (
+                  <span>{(block as RespondBlock).responseSource === 'thinkOutput' ? 'Think Output' : (block as RespondBlock).responseSource === 'toolResult' ? 'Tool Result' : 'Custom'}</span>
+                )}
+                {block.type === 'stop' && <span>-</span>}
+              </div>
+              <div>
+                <span style={{ color: '#64748b' }}>Writes: </span>
+                {block.type === 'start' && <span>Run State</span>}
+                {block.type === 'think' && <span>Next Action, Reasoning</span>}
+                {block.type === 'tool' && <span>Tool Result</span>}
+                {block.type === 'respond' && <span>User Response</span>}
+                {block.type === 'stop' && <span>Run Status</span>}
+              </div>
+              {block.type === 'think' && (
+                <div>
+                  <span style={{ color: '#64748b' }}>Next: </span>
+                  <span>{(block as ThinkBlock).allowedNextActions.map(a => getBlockTypeLabel(a)).join(', ')}</span>
+                </div>
+              )}
+              {block.type === 'tool' && (
+                <div>
+                  <span style={{ color: '#64748b' }}>Tools: </span>
+                  <span>{(block as ToolBlock).allowedTools.length} exposed</span>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
         {executionResults[block.id] && (
           <div style={{ borderTop: '1px solid #e2e8f0' }}>
             <div style={{ padding: '0.75rem 1rem', fontSize: '0.8rem', backgroundColor: '#fafafa' }}>
-              <div style={{ fontWeight: 600, color: '#374151', marginBottom: '0.25rem' }}>Output:</div>
-              <div style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', padding: '0.5rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0', maxHeight: '150px', overflowY: 'auto' }}>
+              <div style={{ fontWeight: 600, color: '#374151', marginBottom: '0.5rem' }}>Output:</div>
+              <div style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', padding: '0.5rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0', maxHeight: '80px', overflowY: 'auto' }}>
                 {executionResults[block.id].output || '(no output)'}
               </div>
               {blockOutputs[block.id]?.reasoning && (
-                <div style={{ marginTop: '0.5rem' }}>
-                  <div style={{ fontWeight: 600, color: '#92400e', marginBottom: '0.25rem' }}>Thinking:</div>
-                  <div style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', padding: '0.5rem', backgroundColor: '#fef3c7', borderRadius: '4px', fontSize: '0.75rem', color: '#78350f', maxHeight: '100px', overflowY: 'auto' }}>
-                    {blockOutputs[block.id].reasoning}
-                  </div>
+                <div style={{ marginTop: '0.5rem', padding: '0.5rem', backgroundColor: '#fef3c7', borderRadius: '4px' }}>
+                  <div style={{ fontWeight: 600, fontSize: '0.7rem', color: '#92400e' }}>Reasoning:</div>
+                  <div style={{ fontSize: '0.75rem', color: '#78350f' }}>{blockOutputs[block.id].reasoning}</div>
+                </div>
+              )}
+              {blockOutputs[block.id]?.toolCall && (
+                <div style={{ marginTop: '0.5rem', padding: '0.5rem', backgroundColor: '#dcfce7', borderRadius: '4px' }}>
+                  <div style={{ fontWeight: 600, fontSize: '0.7rem', color: '#166534' }}>Tool: {blockOutputs[block.id].toolCall?.name}</div>
+                  <div style={{ fontSize: '0.7rem', color: '#15803d' }}>Result: {blockOutputs[block.id].toolCall?.result}</div>
                 </div>
               )}
             </div>
             
-            <CollapsibleSection title="Context to Model" defaultExpanded={false}>
+            <CollapsibleSection title="Debug: Raw Context" defaultExpanded={false}>
               <div style={{ padding: '0.75rem', fontSize: '0.75rem', backgroundColor: '#f8fafc' }}>
                 {blockOutputs[block.id]?.previousContext && (
                   <div style={{ marginBottom: '0.75rem' }}>
-                    <div style={{ fontWeight: 600, color: '#64748b', marginBottom: '0.25rem' }}>Previous Context:</div>
-                    <pre style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', fontSize: '0.7rem', padding: '0.5rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0', maxHeight: '120px', overflowY: 'auto', margin: 0 }}>
+                    <div style={{ fontWeight: 600, color: '#64748b', marginBottom: '0.25rem' }}>Context Sent:</div>
+                    <pre style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', fontSize: '0.65rem', padding: '0.5rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0', maxHeight: '80px', overflowY: 'auto', margin: 0 }}>
 {JSON.stringify(blockOutputs[block.id].previousContext, null, 2)}
                     </pre>
                   </div>
                 )}
-                {blockOutputs[block.id]?.blockContext && (
-                  <div style={{ marginBottom: '0.5rem' }}>
-                    <div style={{ fontWeight: 600, color: '#64748b', marginBottom: '0.25rem' }}>Block Context:</div>
-                    <pre style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', fontSize: '0.7rem', padding: '0.5rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0', maxHeight: '120px', overflowY: 'auto', margin: 0 }}>
-{blockOutputs[block.id].blockContext}
-                    </pre>
-                  </div>
-                )}
-                {!blockOutputs[block.id]?.previousContext && !blockOutputs[block.id]?.blockContext && (
-                  <div style={{ color: '#94a3b8', fontStyle: 'italic' }}>No context data available</div>
+                {!blockOutputs[block.id]?.previousContext && (
+                  <div style={{ color: '#94a3b8', fontStyle: 'italic', fontSize: '0.7rem' }}>No raw context available</div>
                 )}
               </div>
             </CollapsibleSection>
@@ -1096,6 +1097,22 @@ export default function RuntimeBuilder() {
           <>
             <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
               <button
+                onClick={() => setInspectorMode('state')}
+                style={{
+                  flex: 1,
+                  padding: '0.5rem',
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  backgroundColor: inspectorMode === 'state' ? '#3b82f6' : '#fff',
+                  color: inspectorMode === 'state' ? '#fff' : '#64748b',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                }}
+              >
+                State View
+              </button>
+              <button
                 onClick={() => setInspectorMode('block')}
                 style={{
                   flex: 1,
@@ -1109,7 +1126,7 @@ export default function RuntimeBuilder() {
                   cursor: 'pointer',
                 }}
               >
-                Block View
+                Block I/O
               </button>
               <button
                 onClick={() => setInspectorMode('raw')}
@@ -1129,95 +1146,91 @@ export default function RuntimeBuilder() {
               </button>
             </div>
             
-            {inspectorMode === 'block' && (
+            {inspectorMode === 'state' && (
               <>
-                <div style={{ marginBottom: '1rem' }}>
-                  <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', marginBottom: '0.5rem' }}>Select Block:</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                    {activeSpec?.blocks.filter(b => b.enabled).map(block => (
-                      <button
-                        key={block.id}
-                        onClick={() => setSelectedBlockForInspector(block.id)}
-                        style={{
-                          padding: '0.5rem',
-                          textAlign: 'left',
-                          backgroundColor: selectedBlockForInspector === block.id ? '#dbeafe' : '#fff',
-                          border: selectedBlockForInspector === block.id ? '1px solid #3b82f6' : '1px solid #e2e8f0',
-                          borderRadius: '4px',
-                          fontSize: '0.75rem',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        <span style={{ fontWeight: 600 }}>{getBlockTypeLabel(block.type)}</span>: {block.name}
-                      </button>
-                    ))}
-                  </div>
+                <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', marginBottom: '0.5rem' }}>Runtime State Progression:</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {activeSpec?.blocks.filter(b => b.enabled).map((block, idx) => (
+                    <div
+                      key={block.id}
+                      style={{
+                        padding: '0.75rem',
+                        backgroundColor: '#fff',
+                        borderRadius: '4px',
+                        border: '1px solid #e2e8f0',
+                      }}
+                    >
+                      <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#374151', marginBottom: '0.25rem' }}>
+                        {idx + 1}. {getBlockTypeLabel(block.type)}: {block.name}
+                      </div>
+                      <div style={{ fontSize: '0.7rem', color: '#64748b' }}>
+                        <div><span style={{ fontWeight: 600 }}>Reads:</span> {
+                          block.type === 'start' ? 'User Input, Runtime Defaults' :
+                          block.type === 'think' ? ((block as ThinkBlock).contextSources.userInput ? 'User Input, ' : '') + ((block as ThinkBlock).contextSources.runtimeInstructions ? 'Runtime Instructions, ' : '') + ((block as ThinkBlock).contextSources.toolResults ? 'Tool Results' : '') :
+                          block.type === 'tool' ? 'Tool Args, Previous State' :
+                          block.type === 'respond' ? ((block as RespondBlock).responseSource === 'thinkOutput' ? 'Think Output' : (block as RespondBlock).responseSource === 'toolResult' ? 'Tool Result' : 'Custom') :
+                          '-'
+                        }</div>
+                        <div><span style={{ fontWeight: 600 }}>Writes:</span> {
+                          block.type === 'start' ? 'Run State' :
+                          block.type === 'think' ? 'Next Action, Reasoning' :
+                          block.type === 'tool' ? 'Tool Result' :
+                          block.type === 'respond' ? 'User Response' :
+                          block.type === 'stop' ? 'Run Status' :
+                          '-'
+                        }</div>
+                        {block.type === 'tool' && (
+                          <div><span style={{ fontWeight: 600 }}>Exposes:</span> {(block as ToolBlock).allowedTools.join(', ') || 'none'}</div>
+                        )}
+                        {block.type === 'think' && (
+                          <div><span style={{ fontWeight: 600 }}>Allowed Next:</span> {(block as ThinkBlock).allowedNextActions.map(a => getBlockTypeLabel(a)).join(', ')}</div>
+                        )}
+                      </div>
+                      {executionResults[block.id] && (
+                        <div style={{ marginTop: '0.5rem', padding: '0.5rem', backgroundColor: '#f0fdf4', borderRadius: '4px', fontSize: '0.7rem' }}>
+                          <span style={{ fontWeight: 600, color: '#166534' }}>Output: </span>
+                          {executionResults[block.id].output}
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
-                
-                {selectedBlockForInspector && blockInputs[selectedBlockForInspector] && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                    <CollapsibleSection title="Input: Prompt to Model" defaultExpanded={true}>
-                      <div style={{ padding: '0.75rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
-                        <pre style={{ fontFamily: 'monospace', fontSize: '0.7rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0, maxHeight: '150px', overflowY: 'auto' }}>
-{blockInputs[selectedBlockForInspector].prompt}
-                        </pre>
-                      </div>
-                    </CollapsibleSection>
-                    
-                    <CollapsibleSection title="Input: User Message" defaultExpanded={false}>
-                      <div style={{ padding: '0.75rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
-                        <pre style={{ fontFamily: 'monospace', fontSize: '0.7rem', whiteSpace: 'pre-wrap', margin: 0 }}>
-{blockInputs[selectedBlockForInspector].userMessage || '(none)'}
-                        </pre>
-                      </div>
-                    </CollapsibleSection>
-                    
-                    <CollapsibleSection title="Output: Model Response" defaultExpanded={true}>
-                      <div style={{ padding: '0.75rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
-                        <pre style={{ fontFamily: 'monospace', fontSize: '0.7rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0, maxHeight: '150px', overflowY: 'auto' }}>
-{blockResponses[selectedBlockForInspector]?.response || '(no response)'}
-                        </pre>
-                      </div>
-                    </CollapsibleSection>
-                    
-                    {blockResponses[selectedBlockForInspector]?.reasoning && (
-                      <CollapsibleSection title="Output: Reasoning/Thinking" defaultExpanded={false}>
-                        <div style={{ padding: '0.75rem', backgroundColor: '#fef3c7', borderRadius: '4px', border: '1px solid #fcd34d' }}>
-                          <pre style={{ fontFamily: 'monospace', fontSize: '0.7rem', whiteSpace: 'pre-wrap', margin: 0 }}>
-{blockResponses[selectedBlockForInspector].reasoning}
-                          </pre>
-                        </div>
-                      </CollapsibleSection>
-                    )}
-                    
-                    {blockOutputs[selectedBlockForInspector]?.toolCall && (
-                      <CollapsibleSection title="Tool Call Details" defaultExpanded={true}>
-                        <div style={{ padding: '0.75rem', backgroundColor: '#dcfce7', borderRadius: '4px', border: '1px solid #86efac' }}>
-                          <div style={{ fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.5rem' }}>Tool: {blockOutputs[selectedBlockForInspector].toolCall?.name}</div>
-                          <div style={{ fontSize: '0.7rem', marginBottom: '0.25rem' }}><strong>Arguments:</strong></div>
-                          <pre style={{ fontFamily: 'monospace', fontSize: '0.65rem', whiteSpace: 'pre-wrap', margin: '0 0 0.5rem 0', backgroundColor: '#fff', padding: '0.25rem', borderRadius: '2px' }}>
-{JSON.stringify(blockOutputs[selectedBlockForInspector].toolCall?.arguments, null, 2)}
-                          </pre>
-                          {blockOutputs[selectedBlockForInspector].toolCall?.result && (
-                            <>
-                              <div style={{ fontSize: '0.7rem', marginBottom: '0.25rem' }}><strong>Result:</strong></div>
-                              <pre style={{ fontFamily: 'monospace', fontSize: '0.65rem', whiteSpace: 'pre-wrap', margin: 0, backgroundColor: '#fff', padding: '0.25rem', borderRadius: '2px' }}>
-{blockOutputs[selectedBlockForInspector].toolCall?.result}
-                              </pre>
-                            </>
-                          )}
-                        </div>
-                      </CollapsibleSection>
-                    )}
-                  </div>
-                )}
-                
-                {!selectedBlockForInspector && (
-                  <div style={{ textAlign: 'center', padding: '1rem', color: '#94a3b8', fontSize: '0.75rem' }}>
-                    Click a block above to inspect its input/output
-                  </div>
+                {(!activeSpec?.blocks || activeSpec.blocks.length === 0) && (
+                  <div style={{ color: '#94a3b8', fontSize: '0.75rem' }}>No blocks in runtime</div>
                 )}
               </>
+            )}
+
+            {inspectorMode === 'block' && selectedBlockForInspector && blockInputs[selectedBlockForInspector] && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <CollapsibleSection title="Input: Prompt to Model" defaultExpanded={true}>
+                  <div style={{ padding: '0.75rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+                    <pre style={{ fontFamily: 'monospace', fontSize: '0.7rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0, maxHeight: '150px', overflowY: 'auto' }}>
+{blockInputs[selectedBlockForInspector].prompt}
+                    </pre>
+                  </div>
+                </CollapsibleSection>
+                
+                <CollapsibleSection title="Output: Model Response" defaultExpanded={true}>
+                  <div style={{ padding: '0.75rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+                    <pre style={{ fontFamily: 'monospace', fontSize: '0.7rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0, maxHeight: '150px', overflowY: 'auto' }}>
+{blockResponses[selectedBlockForInspector]?.response || '(no response)'}
+                    </pre>
+                  </div>
+                </CollapsibleSection>
+                
+                {blockOutputs[selectedBlockForInspector]?.toolCall && (
+                  <CollapsibleSection title="Tool Call Details" defaultExpanded={true}>
+                    <div style={{ padding: '0.75rem', backgroundColor: '#dcfce7', borderRadius: '4px', border: '1px solid #86efac' }}>
+                      <div style={{ fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.5rem' }}>Tool: {blockOutputs[selectedBlockForInspector].toolCall?.name}</div>
+                      <div style={{ fontSize: '0.7rem', marginBottom: '0.25rem' }}>Arguments: {JSON.stringify(blockOutputs[selectedBlockForInspector].toolCall?.arguments, null, 2)}</div>
+                      {blockOutputs[selectedBlockForInspector].toolCall?.result && (
+                        <div style={{ fontSize: '0.7rem' }}>Result: {blockOutputs[selectedBlockForInspector].toolCall?.result}</div>
+                      )}
+                    </div>
+                  </CollapsibleSection>
+                )}
+              </div>
             )}
             
             {inspectorMode === 'raw' && (
@@ -1398,7 +1411,7 @@ function ThinkBlockEditor({ block, blocks, onChange, disabled }: { block: ThinkB
       
       <div style={{ padding: '0.75rem', backgroundColor: '#f8fafc', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
         <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', marginBottom: '0.5rem' }}>
-          Allowed Next Actions
+          Next Actions (Writes To)
         </div>
         <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem' }}>
@@ -1484,7 +1497,7 @@ function ThinkBlockEditor({ block, blocks, onChange, disabled }: { block: ThinkB
       
       <div style={{ padding: '0.75rem', backgroundColor: '#f8fafc', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
         <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', marginBottom: '0.5rem' }}>
-          Context Sources
+          Reads From (Context Sources)
         </div>
         <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem' }}>
