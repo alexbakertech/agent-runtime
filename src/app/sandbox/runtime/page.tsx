@@ -748,12 +748,12 @@ export default function RuntimeBuilder() {
             <div style={{ padding: '0.75rem 1rem', fontSize: '0.8rem', backgroundColor: '#fafafa' }}>
               <div style={{ fontWeight: 600, color: '#374151', marginBottom: '0.5rem' }}>Output:</div>
               <div style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap', padding: '0.5rem', backgroundColor: '#fff', borderRadius: '4px', border: '1px solid #e2e8f0', maxHeight: '80px', overflowY: 'auto' }}>
-                {executionResults[block.id].output || '(no output)'}
+                {blockResponses[block.id]?.response || executionResults[block.id].output || '(no output)'}
               </div>
-              {blockOutputs[block.id]?.reasoning && (
+              {blockResponses[block.id]?.reasoning && (
                 <div style={{ marginTop: '0.5rem', padding: '0.5rem', backgroundColor: '#fef3c7', borderRadius: '4px' }}>
                   <div style={{ fontWeight: 600, fontSize: '0.7rem', color: '#92400e' }}>Reasoning:</div>
-                  <div style={{ fontSize: '0.75rem', color: '#78350f' }}>{blockOutputs[block.id].reasoning}</div>
+                  <div style={{ fontSize: '0.75rem', color: '#78350f' }}>{blockResponses[block.id].reasoning}</div>
                 </div>
               )}
               {blockOutputs[block.id]?.toolCall && (
