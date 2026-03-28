@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRuntime, useProfiles, useSandbox } from '@/lib/state';
 import type { Runtime, RunPhase, TraceItem, ToolCall, RunState, ToolDefinition } from '@/lib/runtime/types';
+import { AgentRuntime, type ToolDefinition as AgentToolDefinition } from '@/lib/runtime/agent';
 import { listFiles, deleteFile, uploadFile, readFile } from '@/lib/tools/file-storage';
 import type { FileEntry } from '@/lib/tools/file-storage';
 
@@ -920,13 +921,21 @@ export default function RuntimeBuilder() {
     if (!activeRuntime || !input.trim()) return;
     
     const profile = profiles.find(p => p.id === activeRuntime.profileId);
+    if (!profile) {
+      alert('Please select a profile in the runtime settings first.');
+      return;
+    }
     
     setIsRunning(true);
     const userInput = input.trim();
     setInput('');
     
+    const runId = generateId();
+    const trace: TraceItem[] = [];
+    
+    // Set up initial run state
     const newRunState: RunState = {
-      runId: generateId(),
+      runId,
       runtimeId: activeRuntime.id,
       messages: [{ role: 'user', content: userInput }],
       phase: 'ingest',
@@ -940,187 +949,168 @@ export default function RuntimeBuilder() {
     
     updateRuntime({ runState: newRunState });
     
-    // Generate context snapshot for user message
+    // Generate context snapshot
     const contextSnapshot = `System: ${activeRuntime.systemPrompt}
 
 Available tools: ${effectiveActiveTools.join(', ')}
 
 User: ${userInput}`;
-    // Store at index 0 since this is the first (and only) user message in the run
     setContextSnapshots(prev => ({ ...prev, [0]: contextSnapshot }));
     
-    // Ingest phase
-    setCurrentPhase('ingest');
-    await new Promise(r => setTimeout(r, 300));
-    
-    const traceIngest: TraceItem = {
-      id: generateId(),
-      stepId: generateId(),
-      phase: 'ingest',
-      contextSummary: 'Received user input',
-      transitionReason: 'User message received',
-      timestamp: new Date().toISOString(),
-    };
-    
-    // Plan phase
-    setCurrentPhase('plan');
-    if (activeRuntime.displayConfig.showThinking) {
-      setThinking('Analyzing the request to determine next action...');
-    }
-    await new Promise(r => setTimeout(r, 500));
-    
-    // Determine which tool to call based on available tools
-    const availableTools = effectiveActiveTools;
-    const toolToCall = availableTools.length > 0 ? availableTools[0] : null;
-    
-    const tracePlan: TraceItem = {
-      id: generateId(),
-      stepId: generateId(),
-      phase: 'plan',
-      previousPhase: 'ingest',
-      nextPhase: toolToCall ? 'act' : 'respond',
-      contextSummary: toolToCall ? `Determined need to call ${toolToCall}` : 'Determined to respond directly',
-      thinkingStream: activeRuntime.displayConfig.showThinking 
-        ? (toolToCall ? `I should use the ${toolToCall} tool to help the user.` : 'I can answer this directly.')
-        : undefined,
-      transitionReason: toolToCall ? 'Model decided to call a tool' : 'Model decided to respond directly',
-      timestamp: new Date().toISOString(),
-    };
-    setThinking('');
-    
-    // If no tools available, skip to respond
-    if (!toolToCall) {
-      const directResponse = "I don't have any tools available to use. Is there something else I can help you with?";
-      
-      const traceRespond: TraceItem = {
-        id: generateId(),
-        stepId: generateId(),
-        phase: 'respond',
-        previousPhase: 'plan',
-        responseStream: directResponse,
-        contextSummary: 'Generated user-facing response',
-        transitionReason: 'No tools available, responded directly',
-        timestamp: new Date().toISOString(),
+    // Set up tool definitions for the agent
+    const toolDefs: AgentToolDefinition[] = effectiveActiveTools.map(toolName => {
+      return {
+        type: 'function',
+        function: {
+          name: toolName,
+          description: `Execute ${toolName}`,
+          parameters: { type: 'object', properties: {} },
+        },
       };
+    });
+    
+    // Create agent runtime
+    const agent = new AgentRuntime((stage, data) => {
+      // Map LoopStage to RunPhase for UI display
+      const phaseMap: Record<string, RunPhase> = {
+        preparing: 'ingest',
+        calling: 'plan',
+        receiving: 'act',
+        finished: 'respond',
+        error: 'respond',
+      };
+      setCurrentPhase(phaseMap[stage] || 'ingest');
       
-      const allTrace = [traceIngest, tracePlan, traceRespond];
+      if (stage === 'receiving' && data) {
+        // Update thinking/response
+        if (data.content) {
+          setThinking(data.content);
+        }
+        
+        // Add tool call to trace
+        if (data.toolCalls && data.toolCalls.length > 0) {
+          const tc = data.toolCalls[0];
+          const existingTrace = trace.find(t => t.phase === 'plan' && t.toolCall?.id === tc.id);
+          if (!existingTrace) {
+            const toolCallItem: TraceItem = {
+              id: generateId(),
+              stepId: generateId(),
+              phase: 'plan',
+              contextSummary: `Model requested to call tool: ${tc.name}`,
+              toolCall: {
+                id: tc.id,
+                name: tc.name,
+                arguments: tc.arguments ? JSON.parse(tc.arguments) : {},
+              },
+              transitionReason: 'Model decided to call a tool',
+              timestamp: new Date().toISOString(),
+            };
+            trace.push(toolCallItem);
+          }
+        }
+      }
       
+      if (stage === 'finished' && data) {
+        // Clear thinking
+        setThinking('');
+        
+        // Add final response to trace
+        if (data.content) {
+          const respondItem: TraceItem = {
+            id: generateId(),
+            stepId: generateId(),
+            phase: 'respond',
+            contextSummary: 'Generated user-facing response',
+            responseStream: data.content,
+            transitionReason: data.toolCallCount > 0 
+              ? `Completed after ${data.toolCallCount} tool call(s)` 
+              : 'Direct response',
+            timestamp: new Date().toISOString(),
+          };
+          trace.push(respondItem);
+        }
+      }
+    });
+    
+    // Configure agent with tools
+    agent.setOptions({
+      tools: toolDefs,
+      maxToolCalls: activeRuntime.loopLimits.maxToolCalls,
+    });
+    
+    try {
+      // Run the agent
+      const result = await agent.run(
+        {
+          baseUrl: profile.baseUrl,
+          apiKey: profile.apiKey,
+          model: profile.model,
+          temperature: activeRuntime.modelConfig.temperature,
+          maxTokens: activeRuntime.modelConfig.maxTokens,
+        },
+        userInput,
+        [], // empty transcript for now
+        {},
+        {
+          prefix: activeRuntime.systemPrompt,
+          prefixEnabled: true,
+          historyEnabled: false,
+          includeThinkingInContext: activeRuntime.displayConfig.showThinking,
+        },
+        sandboxFiles
+      );
+      
+      // Update final run state
       const finalRunState: RunState = {
-        ...newRunState,
+        runId,
+        runtimeId: activeRuntime.id,
         messages: [
           { role: 'user', content: userInput },
-          { role: 'assistant', content: directResponse },
+          { role: 'assistant', content: result.content },
         ],
         phase: 'respond',
         stepCount: 1,
-        toolCallCount: 0,
-        trace: allTrace,
+        toolCallCount: result.toolCallCount,
+        activeTools: effectiveActiveTools,
+        trace,
+        sandboxSnapshot: {},
         status: 'completed',
-        finalOutput: directResponse,
+        finalOutput: result.content,
       };
       
       updateRuntime({ runState: finalRunState });
-      setIsRunning(false);
-      setCurrentPhase(null);
-      return;
-    }
-    
-    // Act phase
-    setCurrentPhase('act');
-    let toolResult: string;
-    try {
-      // Execute the tool
-      if (toolToCall === 'get_time') {
-        toolResult = new Date().toISOString();
-      } else if (toolToCall === 'list_files') {
-        const files = sandboxFiles.map(f => f.path).join(', ');
-        toolResult = files || 'No files in sandbox';
-      } else if (toolToCall === 'read_file' || toolToCall === 'search_text') {
-        toolResult = `Tool ${toolToCall} requires arguments. Add file handling logic.`;
-      } else {
-        toolResult = `Tool ${toolToCall} executed`;
-      }
+      
     } catch (err: any) {
-      toolResult = `Error: ${err.message}`;
+      // Handle error
+      const errorTrace: TraceItem = {
+        id: generateId(),
+        stepId: generateId(),
+        phase: 'respond',
+        contextSummary: 'Error occurred',
+        responseStream: `Error: ${err.message}`,
+        transitionReason: 'Run failed',
+        timestamp: new Date().toISOString(),
+      };
+      trace.push(errorTrace);
+      
+      const errorRunState: RunState = {
+        ...newRunState,
+        messages: [
+          { role: 'user', content: userInput },
+          { role: 'assistant', content: `Error: ${err.message}` },
+        ],
+        phase: 'respond',
+        trace,
+        status: 'failed',
+        finalOutput: err.message,
+      };
+      
+      updateRuntime({ runState: errorRunState });
     }
     
-    const toolCall: ToolCall = {
-      id: generateId(),
-      name: toolToCall,
-      arguments: {},
-      result: toolResult,
-    };
-    
-    const traceAct: TraceItem = {
-      id: generateId(),
-      stepId: generateId(),
-      phase: 'act',
-      previousPhase: 'plan',
-      toolCall,
-      toolResult: toolCall.result,
-      contextSummary: `Executed tool: ${toolCall.name}`,
-      transitionReason: 'Tool execution completed',
-      timestamp: new Date().toISOString(),
-    };
-    
-    // Evaluate phase
-    setCurrentPhase('evaluate');
-    await new Promise(r => setTimeout(r, 300));
-    
-    const traceEvaluate: TraceItem = {
-      id: generateId(),
-      stepId: generateId(),
-      phase: 'evaluate',
-      previousPhase: 'act',
-      nextPhase: 'respond',
-      evaluationResult: 'Tool result received, ready to respond',
-      contextSummary: 'Evaluated tool result',
-      transitionReason: 'Continuing to respond phase',
-      timestamp: new Date().toISOString(),
-    };
-    
-    // Respond phase
-    setCurrentPhase('respond');
-    let response: string;
-    if (toolToCall === 'get_time') {
-      response = `The current time is ${toolCall.result}. How can I help you further?`;
-    } else if (toolToCall === 'list_files') {
-      response = `Here are the files in the sandbox: ${toolCall.result}. Would you like me to do anything with these?`;
-    } else {
-      response = `Tool execution result: ${toolCall.result}`;
-    }
-    
-    const traceRespond: TraceItem = {
-      id: generateId(),
-      stepId: generateId(),
-      phase: 'respond',
-      previousPhase: 'evaluate',
-      responseStream: response,
-      contextSummary: 'Generated user-facing response',
-      transitionReason: 'Run completed successfully',
-      timestamp: new Date().toISOString(),
-    };
-    
-    const allTrace = [traceIngest, tracePlan, traceAct, traceEvaluate, traceRespond];
-    
-    const finalRunState: RunState = {
-      ...newRunState,
-      messages: [
-        { role: 'user', content: userInput },
-        { role: 'assistant', content: response },
-      ],
-      phase: 'respond',
-      stepCount: 1,
-      toolCallCount: 1,
-      trace: allTrace,
-      status: 'completed',
-      finalOutput: response,
-    };
-    
-    updateRuntime({ runState: finalRunState });
     setIsRunning(false);
     setCurrentPhase(null);
-  }, [activeRuntime, input, effectiveActiveTools, profiles, updateRuntime]);
+  }, [activeRuntime, input, effectiveActiveTools, profiles, allToolDefinitions, sandboxFiles, updateRuntime]);
 
   const canSubmit = !!activeProfile && !!input.trim() && !isRunning;
 

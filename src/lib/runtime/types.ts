@@ -12,6 +12,8 @@ export interface RuntimeConfig {
   apiKey: string;
   model: string;
   name?: string;
+  temperature?: number;
+  maxTokens?: number;
 }
 
 export interface TraceEvent {
