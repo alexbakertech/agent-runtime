@@ -817,8 +817,10 @@ export default function RuntimeBuilder() {
 
   const loadSandboxFiles = useCallback(async () => {
     try {
-      const files = await listFiles('.');
-      setSandboxFiles(files);
+      const { getAllFiles } = await import('@/lib/tools/file-storage');
+      const files = await getAllFiles();
+      console.log('[Runtime] All files in sandbox:', files.length, files.map(f => f.path));
+      setSandboxFiles(files.map(f => ({ path: f.path, name: f.name, type: f.type, lastModified: f.lastModified })));
     } catch (err) {
       console.error('Failed to load sandbox files:', err);
     }
