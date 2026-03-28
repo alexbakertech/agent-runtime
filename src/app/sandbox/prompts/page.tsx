@@ -8,6 +8,17 @@ function generateId(): string {
   return `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 }
 
+const DEFAULT_PROMPTS = {
+  system: 'You are a helpful AI assistant with access to tools.',
+  plan: 'Analyze the user request and determine the best action. Available actions: respond directly, call a tool, or ask for clarification.',
+  evaluate: 'Evaluate the tool result and determine if more actions are needed or if ready to respond.',
+  respond: 'Generate a helpful, concise response to the user based on the conversation context.',
+};
+
+function getRuntimePrompts(rt: Runtime) {
+  return rt.prompts || DEFAULT_PROMPTS;
+}
+
 export default function PromptsBuilder() {
   const { runtime, updateRuntime } = useRuntime();
   const runtimes = Object.values(runtime.runtimes);
@@ -24,7 +35,7 @@ export default function PromptsBuilder() {
         ...runtime.runtimes,
         [activeRuntime.id]: { 
           ...activeRuntime, 
-          prompts: { ...activeRuntime.prompts, [key]: value },
+          prompts: { ...getRuntimePrompts(activeRuntime), [key]: value },
           updatedAt: new Date().toISOString() 
         },
       },
@@ -182,7 +193,7 @@ export default function PromptsBuilder() {
                     </div>
                   </div>
                   <textarea
-                    value={activeRuntime.prompts[field.key]}
+                    value={getRuntimePrompts(activeRuntime)[field.key]}
                     onChange={(e) => handlePromptChange(field.key, e.target.value)}
                     rows={4}
                     style={{
@@ -216,7 +227,7 @@ export default function PromptsBuilder() {
                 Ingest Phase
               </div>
               <pre style={{ margin: 0, fontSize: '0.75rem', fontFamily: 'monospace', whiteSpace: 'pre-wrap', color: '#475569' }}>
-{activeRuntime.prompts.system}
+{getRuntimePrompts(activeRuntime).system}
               </pre>
             </div>
 
@@ -225,7 +236,7 @@ export default function PromptsBuilder() {
                 Plan Phase
               </div>
               <pre style={{ margin: 0, fontSize: '0.75rem', fontFamily: 'monospace', whiteSpace: 'pre-wrap', color: '#475569' }}>
-{activeRuntime.prompts.plan}
+{getRuntimePrompts(activeRuntime).plan}
               </pre>
             </div>
 
@@ -234,7 +245,7 @@ export default function PromptsBuilder() {
                 Evaluate Phase
               </div>
               <pre style={{ margin: 0, fontSize: '0.75rem', fontFamily: 'monospace', whiteSpace: 'pre-wrap', color: '#475569' }}>
-{activeRuntime.prompts.evaluate}
+{getRuntimePrompts(activeRuntime).evaluate}
               </pre>
             </div>
 
@@ -243,7 +254,7 @@ export default function PromptsBuilder() {
                 Respond Phase
               </div>
               <pre style={{ margin: 0, fontSize: '0.75rem', fontFamily: 'monospace', whiteSpace: 'pre-wrap', color: '#475569' }}>
-{activeRuntime.prompts.respond}
+{getRuntimePrompts(activeRuntime).respond}
               </pre>
             </div>
           </div>
