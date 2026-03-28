@@ -611,7 +611,7 @@ function ChatWorkspace({
         </div>
       </div>
 
-      <CollapsibleSection title="Tool Controls" defaultExpanded={false}>
+      <CollapsibleSection title="Tool Controls" defaultExpanded={true}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
           {toolRegistry.map((tool) => (
             <label key={tool.name} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', cursor: 'pointer' }}>
@@ -969,26 +969,86 @@ User: ${userInput}`;
     }
     await new Promise(r => setTimeout(r, 500));
     
+    // Determine which tool to call based on available tools
+    const availableTools = effectiveActiveTools;
+    const toolToCall = availableTools.length > 0 ? availableTools[0] : null;
+    
     const tracePlan: TraceItem = {
       id: generateId(),
       stepId: generateId(),
       phase: 'plan',
       previousPhase: 'ingest',
-      nextPhase: 'act',
-      contextSummary: 'Determined need to call a tool',
-      thinkingStream: activeRuntime.displayConfig.showThinking ? 'I should use the get_time tool to provide current information.' : undefined,
-      transitionReason: 'Model decided to call a tool',
+      nextPhase: toolToCall ? 'act' : 'respond',
+      contextSummary: toolToCall ? `Determined need to call ${toolToCall}` : 'Determined to respond directly',
+      thinkingStream: activeRuntime.displayConfig.showThinking 
+        ? (toolToCall ? `I should use the ${toolToCall} tool to help the user.` : 'I can answer this directly.')
+        : undefined,
+      transitionReason: toolToCall ? 'Model decided to call a tool' : 'Model decided to respond directly',
       timestamp: new Date().toISOString(),
     };
     setThinking('');
     
+    // If no tools available, skip to respond
+    if (!toolToCall) {
+      const directResponse = "I don't have any tools available to use. Is there something else I can help you with?";
+      
+      const traceRespond: TraceItem = {
+        id: generateId(),
+        stepId: generateId(),
+        phase: 'respond',
+        previousPhase: 'plan',
+        responseStream: directResponse,
+        contextSummary: 'Generated user-facing response',
+        transitionReason: 'No tools available, responded directly',
+        timestamp: new Date().toISOString(),
+      };
+      
+      const allTrace = [traceIngest, tracePlan, traceRespond];
+      
+      const finalRunState: RunState = {
+        ...newRunState,
+        messages: [
+          { role: 'user', content: userInput },
+          { role: 'assistant', content: directResponse },
+        ],
+        phase: 'respond',
+        stepCount: 1,
+        toolCallCount: 0,
+        trace: allTrace,
+        status: 'completed',
+        finalOutput: directResponse,
+      };
+      
+      updateRuntime({ runState: finalRunState });
+      setIsRunning(false);
+      setCurrentPhase(null);
+      return;
+    }
+    
     // Act phase
     setCurrentPhase('act');
+    let toolResult: string;
+    try {
+      // Execute the tool
+      if (toolToCall === 'get_time') {
+        toolResult = new Date().toISOString();
+      } else if (toolToCall === 'list_files') {
+        const files = sandboxFiles.map(f => f.path).join(', ');
+        toolResult = files || 'No files in sandbox';
+      } else if (toolToCall === 'read_file' || toolToCall === 'search_text') {
+        toolResult = `Tool ${toolToCall} requires arguments. Add file handling logic.`;
+      } else {
+        toolResult = `Tool ${toolToCall} executed`;
+      }
+    } catch (err: any) {
+      toolResult = `Error: ${err.message}`;
+    }
+    
     const toolCall: ToolCall = {
       id: generateId(),
-      name: 'get_time',
+      name: toolToCall,
       arguments: {},
-      result: new Date().toISOString(),
+      result: toolResult,
     };
     
     const traceAct: TraceItem = {
@@ -1021,7 +1081,14 @@ User: ${userInput}`;
     
     // Respond phase
     setCurrentPhase('respond');
-    const response = `The current time is ${toolCall.result}. How can I help you further?`;
+    let response: string;
+    if (toolToCall === 'get_time') {
+      response = `The current time is ${toolCall.result}. How can I help you further?`;
+    } else if (toolToCall === 'list_files') {
+      response = `Here are the files in the sandbox: ${toolCall.result}. Would you like me to do anything with these?`;
+    } else {
+      response = `Tool execution result: ${toolCall.result}`;
+    }
     
     const traceRespond: TraceItem = {
       id: generateId(),
