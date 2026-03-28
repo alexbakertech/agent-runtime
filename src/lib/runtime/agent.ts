@@ -284,6 +284,9 @@ export class AgentRuntime {
               args = {};
             }
 
+            // Act phase - execute the tool
+            await this.transition('act', { toolCall: tc.name, arguments: args });
+
             // Execute the tool
             const result = await this.executeTool(tc.name, args, sandboxFiles);
             toolResults.push({
@@ -300,8 +303,10 @@ export class AgentRuntime {
               content: result
             });
 
+            // Evaluate phase - evaluate the tool result
+            await this.transition('evaluate', { toolCall: tc.name, result, toolCallCount: toolCallCount + 1 });
+
             toolCallCount++;
-            await this.transition('finished', { toolCall: tc.name, result, toolCallCount });
           }
 
           // Continue loop to get next response from model

@@ -997,45 +997,95 @@ User: ${userInput}`;
       const phaseMap: Record<string, RunPhase> = {
         preparing: 'ingest',
         calling: 'plan',
-        receiving: 'act',
+        receiving: 'plan',
+        act: 'act',
+        evaluate: 'evaluate',
         finished: 'respond',
         error: 'respond',
       };
       setCurrentPhase(phaseMap[stage] || 'ingest');
       
-      if (stage === 'receiving' && data) {
-        // Update thinking/response
-        if (data.content) {
-          setThinking(data.content);
-        }
-        
-        // Add tool call to trace
-        if (data.toolCalls && data.toolCalls.length > 0) {
-          const tc = data.toolCalls[0];
+      // Handle different stages for trace
+      if (stage === 'calling' && data?.toolCalls) {
+        // Model is deciding to call a tool - this is still in Plan phase
+        const toolCalls = data.toolCalls as Array<{ id: string; name: string; arguments: string }>;
+        for (const tc of toolCalls) {
           const existingTrace = trace.find(t => t.phase === 'plan' && t.toolCall?.id === tc.id);
           if (!existingTrace) {
             let parsedArgs = {};
             try {
               parsedArgs = tc.arguments ? JSON.parse(tc.arguments) : {};
             } catch (e) {
-              // Arguments might be incomplete during streaming, use empty object
               parsedArgs = {};
             }
             const toolCallItem: TraceItem = {
               id: generateId(),
               stepId: generateId(),
               phase: 'plan',
-              contextSummary: `Model requested to call tool: ${tc.name}`,
+              previousPhase: 'ingest',
+              nextPhase: 'act',
+              contextSummary: `Model decided to call tool: ${tc.name}`,
               toolCall: {
                 id: tc.id,
                 name: tc.name,
                 arguments: parsedArgs,
               },
-              transitionReason: 'Model decided to call a tool',
+              transitionReason: 'Model requested tool call',
               timestamp: new Date().toISOString(),
             };
             trace.push(toolCallItem);
           }
+        }
+      }
+      
+      if (stage === 'act' && data) {
+        // Tool is being executed - Act phase
+        const existingAct = trace.find(t => t.phase === 'act' && t.toolCall?.name === data.toolCall);
+        if (!existingAct) {
+          const actItem: TraceItem = {
+            id: generateId(),
+            stepId: generateId(),
+            phase: 'act',
+            previousPhase: 'plan',
+            nextPhase: 'evaluate',
+            contextSummary: `Executing tool: ${data.toolCall}`,
+            toolCall: {
+              id: generateId(),
+              name: data.toolCall,
+              arguments: data.arguments || {},
+              result: data.result,
+            },
+            toolResult: data.result,
+            transitionReason: 'Tool execution in progress',
+            timestamp: new Date().toISOString(),
+          };
+          trace.push(actItem);
+        }
+      }
+      
+      if (stage === 'evaluate' && data) {
+        // Evaluating tool result - Evaluate phase
+        const existingEval = trace.find(t => t.phase === 'evaluate' && t.toolCall?.name === data.toolCall);
+        if (!existingEval) {
+          const evalItem: TraceItem = {
+            id: generateId(),
+            stepId: generateId(),
+            phase: 'evaluate',
+            previousPhase: 'act',
+            nextPhase: 'plan',
+            contextSummary: `Evaluated result from ${data.toolCall}`,
+            evaluationResult: data.result,
+            transitionReason: 'Tool result received, continuing to next iteration',
+            timestamp: new Date().toISOString(),
+          };
+          trace.push(evalItem);
+        }
+      }
+      
+      if (stage === 'receiving' && data) {
+        // Update thinking/response during streaming
+        if (data.content) {
+          setThinking(data.content);
         }
       }
       

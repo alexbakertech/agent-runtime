@@ -1,4 +1,4 @@
-export type LoopStage = 'idle' | 'preparing' | 'calling' | 'receiving' | 'finished' | 'error';
+export type LoopStage = 'idle' | 'preparing' | 'calling' | 'receiving' | 'act' | 'evaluate' | 'finished' | 'error';
 
 export interface Message {
   role: 'user' | 'assistant' | 'system';
