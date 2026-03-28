@@ -76,4 +76,5 @@ export {
   useBrowserConsent,
   useRetryEnabled,
   useRuntimeSpec,
+  useRuntime,
 } from './StateContext';

@@ -18,9 +18,11 @@ import type {
   SandboxUIState,
   RuntimeSpecUIState,
   RuntimeSpecState,
+  RuntimeState,
 } from './types';
 import { CURRENT_VERSION } from './types';
 import { RuntimeSpec, RuntimeExecutionState, createDefaultRuntime } from '@/lib/runtime/spec/types';
+import type { Runtime, RunState, ToolDefinition, SandboxFile } from '@/lib/runtime/types';
 
 const DEFAULT_SYSTEM_PROMPT = "You are a helpful AI assistant. Answer concisely.";
 
@@ -210,4 +212,63 @@ export function createDefaultSandboxState(): SandboxState {
 
 export function createDefaultRuntimeSpecAppState(): RuntimeSpecState {
   return createDefaultRuntimeSpecState();
+}
+
+function generateId(): string {
+  return `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+}
+
+const BUILT_IN_TOOLS: ToolDefinition[] = [
+  { id: 'get_time', name: 'get_time', description: 'Returns the current system time', inputSchema: { type: 'object', properties: {} } },
+  { id: 'list_files', name: 'list_files', description: 'Lists files in the sandbox directory', inputSchema: { type: 'object', properties: { dirPath: { type: 'string' } } } },
+  { id: 'read_file', name: 'read_file', description: 'Reads file content from sandbox', inputSchema: { type: 'object', properties: { filePath: { type: 'string' } }, required: ['filePath'] } },
+  { id: 'search_text', name: 'search_text', description: 'Searches for text in sandbox files', inputSchema: { type: 'object', properties: { pattern: { type: 'string' }, dirPath: { type: 'string' } }, required: ['pattern'] } },
+];
+
+export function createDefaultRuntimeState(): RuntimeState {
+  const now = new Date().toISOString();
+  const defaultRuntime: Runtime = {
+    id: generateId(),
+    name: 'Default Runtime',
+    systemPrompt: 'You are a helpful AI assistant.',
+    modelConfig: {
+      model: 'gpt-4',
+      temperature: 0.7,
+      maxTokens: 2048,
+    },
+    defaultTools: ['get_time', 'list_files', 'read_file'],
+    loopLimits: {
+      maxSteps: 10,
+      maxToolCalls: 20,
+    },
+    displayConfig: {
+      showThinking: true,
+    },
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  return {
+    runtimes: { [defaultRuntime.id]: defaultRuntime },
+    activeRuntimeId: defaultRuntime.id,
+    runState: null,
+    toolRegistry: BUILT_IN_TOOLS,
+    sandboxFiles: [],
+    availableTools: BUILT_IN_TOOLS.map(t => t.name),
+  };
+}
+
+export function createEmptyRunState(runtimeId: string): RunState {
+  return {
+    runId: generateId(),
+    runtimeId,
+    messages: [],
+    phase: 'ingest',
+    stepCount: 0,
+    toolCallCount: 0,
+    activeTools: [],
+    trace: [],
+    sandboxSnapshot: {},
+    status: 'running',
+  };
 }

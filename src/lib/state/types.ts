@@ -93,6 +93,9 @@ export interface PageAppStates {
   
   /** Runtime Spec page app state */
   runtimeSpec?: RuntimeSpecState;
+  
+  /** Runtime page app state (v0.1) */
+  runtime?: RuntimeState;
 }
 
 /**
@@ -369,6 +372,7 @@ export interface ValidationResult {
 }
 
 import { RuntimeSpec, RuntimeExecutionState, RuntimeBlock } from '@/lib/runtime/spec/types';
+import type { Runtime, RunState, ToolDefinition, SandboxFile } from '@/lib/runtime/types';
 
 /**
  * Runtime Spec page state.
@@ -392,6 +396,30 @@ export interface RuntimeSpecState {
   
   /** Whether the runtime is currently locked (running) */
   isLocked: boolean;
+}
+
+/**
+ * v0.1 Runtime page state.
+ * Manages runtime configs and run state.
+ */
+export interface RuntimeState {
+  /** All saved runtime configurations */
+  runtimes: Record<string, Runtime>;
+  
+  /** Currently active runtime ID */
+  activeRuntimeId: string | null;
+  
+  /** Current ephemeral run state */
+  runState: RunState | null;
+  
+  /** Global tool registry */
+  toolRegistry: ToolDefinition[];
+  
+  /** Global sandbox files */
+  sandboxFiles: SandboxFile[];
+  
+  /** Available tools (from registry + custom) */
+  availableTools: string[];
 }
 
 /**
