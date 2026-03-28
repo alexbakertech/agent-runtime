@@ -1008,34 +1008,20 @@ User: ${userInput}`;
       
       // Handle different stages for trace
       if (stage === 'calling' && data?.toolCalls) {
-        // Model is deciding to call a tool - this is still in Plan phase
+        // Model is deciding what action to take - Plan phase
         const toolCalls = data.toolCalls as Array<{ id: string; name: string; arguments: string }>;
-        for (const tc of toolCalls) {
-          const existingTrace = trace.find(t => t.phase === 'plan' && t.toolCall?.id === tc.id);
-          if (!existingTrace) {
-            let parsedArgs = {};
-            try {
-              parsedArgs = tc.arguments ? JSON.parse(tc.arguments) : {};
-            } catch (e) {
-              parsedArgs = {};
-            }
-            const toolCallItem: TraceItem = {
-              id: generateId(),
-              stepId: generateId(),
-              phase: 'plan',
-              previousPhase: 'ingest',
-              nextPhase: 'act',
-              contextSummary: `Model decided to call tool: ${tc.name}`,
-              toolCall: {
-                id: tc.id,
-                name: tc.name,
-                arguments: parsedArgs,
-              },
-              transitionReason: 'Model requested tool call',
-              timestamp: new Date().toISOString(),
-            };
-            trace.push(toolCallItem);
-          }
+        if (toolCalls.length > 0 && !trace.find(t => t.phase === 'plan')) {
+          const planItem: TraceItem = {
+            id: generateId(),
+            stepId: generateId(),
+            phase: 'plan',
+            previousPhase: 'ingest',
+            nextPhase: 'act',
+            contextSummary: 'Model is determining next action',
+            transitionReason: 'Model requested tool call',
+            timestamp: new Date().toISOString(),
+          };
+          trace.push(planItem);
         }
       }
       
