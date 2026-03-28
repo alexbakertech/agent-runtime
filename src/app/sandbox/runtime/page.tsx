@@ -1014,6 +1014,13 @@ User: ${userInput}`;
           const tc = data.toolCalls[0];
           const existingTrace = trace.find(t => t.phase === 'plan' && t.toolCall?.id === tc.id);
           if (!existingTrace) {
+            let parsedArgs = {};
+            try {
+              parsedArgs = tc.arguments ? JSON.parse(tc.arguments) : {};
+            } catch (e) {
+              // Arguments might be incomplete during streaming, use empty object
+              parsedArgs = {};
+            }
             const toolCallItem: TraceItem = {
               id: generateId(),
               stepId: generateId(),
@@ -1022,7 +1029,7 @@ User: ${userInput}`;
               toolCall: {
                 id: tc.id,
                 name: tc.name,
-                arguments: tc.arguments ? JSON.parse(tc.arguments) : {},
+                arguments: parsedArgs,
               },
               transitionReason: 'Model decided to call a tool',
               timestamp: new Date().toISOString(),
