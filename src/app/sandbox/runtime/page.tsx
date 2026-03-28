@@ -536,22 +536,22 @@ function ChatWorkspace({
                       {isUser ? 'U' : 'AI'}
                     </div>
                     <div style={{ flex: 1 }}>
-                      <div style={{ 
-                        whiteSpace: 'pre-wrap', 
-                        lineHeight: 1.6, 
-                        fontSize: '0.95rem', 
-                        color: '#334155'
-                      }}>
-                        {msg.content}
-                      </div>
-                      
-                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', marginTop: '0.5rem' }}>
-                        {isUser && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div style={{ 
+                          whiteSpace: 'pre-wrap', 
+                          lineHeight: 1.6, 
+                          fontSize: '0.95rem', 
+                          color: '#334155',
+                          flex: 1
+                        }}>
+                          {msg.content}
+                        </div>
+                        {isUser && contextSnapshots[i] && (
                           <button 
                             onClick={() => setViewingSnapshotIndex(showSnapshot ? null : i)}
-                            style={{ fontSize: '0.7rem', color: '#3b82f6', background: '#eff6ff', border: '1px solid #3b82f6', borderRadius: '4px', padding: '0.25rem 0.5rem', cursor: 'pointer', whiteSpace: 'nowrap', fontWeight: 600 }}
+                            style={{ fontSize: '0.65rem', color: '#3b82f6', background: 'none', border: '1px solid #bfdbfe', borderRadius: '4px', padding: '0.2rem 0.4rem', cursor: 'pointer', whiteSpace: 'nowrap', marginLeft: '1rem' }}
                           >
-                            {showSnapshot ? 'HIDE CONTEXT' : 'VIEW CONTEXT'}
+                            {showSnapshot ? 'HIDE' : 'CONTEXT'}
                           </button>
                         )}
                       </div>
@@ -946,8 +946,8 @@ export default function RuntimeBuilder() {
 Available tools: ${effectiveActiveTools.join(', ')}
 
 User: ${userInput}`;
-    const msgIndex = runState?.messages?.length || 0;
-    setContextSnapshots(prev => ({ ...prev, [msgIndex]: contextSnapshot }));
+    // Store at index 0 since this is the first (and only) user message in the run
+    setContextSnapshots(prev => ({ ...prev, [0]: contextSnapshot }));
     
     // Ingest phase
     setCurrentPhase('ingest');
