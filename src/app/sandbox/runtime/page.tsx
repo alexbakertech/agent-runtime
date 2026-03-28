@@ -492,9 +492,6 @@ function ChatWorkspace({
   onInputChange,
   onSubmit,
   isRunning,
-  toolRegistry,
-  activeTools,
-  onToolToggle,
   showThinking,
   thinking,
   canSubmit,
@@ -505,9 +502,6 @@ function ChatWorkspace({
   onInputChange: (value: string) => void;
   onSubmit: () => void;
   isRunning: boolean;
-  toolRegistry: { name: string; description: string }[];
-  activeTools: string[];
-  onToolToggle: (toolName: string) => void;
   showThinking: boolean;
   thinking: string;
   canSubmit: boolean;
@@ -628,23 +622,6 @@ function ChatWorkspace({
           )}
         </div>
       </div>
-
-      <CollapsibleSection title="Tool Controls" defaultExpanded={true}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-          {toolRegistry.map((tool) => (
-            <label key={tool.name} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={activeTools.includes(tool.name)}
-                onChange={() => onToolToggle(tool.name)}
-                disabled={isRunning}
-              />
-              <span style={{ fontWeight: 500 }}>{tool.name}</span>
-              <span style={{ color: '#64748b' }}>- {tool.description}</span>
-            </label>
-          ))}
-        </div>
-      </CollapsibleSection>
 
       <div style={{ padding: '2rem', borderTop: '1px solid #e2e8f0' }}>
         <div style={{ maxWidth: '700px', margin: '0 auto' }}>
@@ -1265,9 +1242,6 @@ User: ${userInput}`;
           onInputChange={setInput}
           onSubmit={simulateRun}
           isRunning={isRunning}
-          toolRegistry={toolRegistry}
-          activeTools={effectiveActiveTools}
-          onToolToggle={handleToolToggle}
           showThinking={!!activeRuntime?.displayConfig.showThinking}
           thinking={thinking}
           canSubmit={canSubmit}
