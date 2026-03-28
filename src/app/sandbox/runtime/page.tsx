@@ -546,10 +546,10 @@ function ChatWorkspace({
                       </div>
                       
                       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', marginTop: '0.5rem' }}>
-                        {isUser && contextSnapshots[i] && (
+                        {isUser && (
                           <button 
                             onClick={() => setViewingSnapshotIndex(showSnapshot ? null : i)}
-                            style={{ fontSize: '0.65rem', color: '#3b82f6', background: 'none', border: '1px solid #bfdbfe', borderRadius: '4px', padding: '0.2rem 0.4rem', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                            style={{ fontSize: '0.7rem', color: '#3b82f6', background: '#eff6ff', border: '1px solid #3b82f6', borderRadius: '4px', padding: '0.25rem 0.5rem', cursor: 'pointer', whiteSpace: 'nowrap', fontWeight: 600 }}
                           >
                             {showSnapshot ? 'HIDE CONTEXT' : 'VIEW CONTEXT'}
                           </button>
@@ -947,7 +947,7 @@ Available tools: ${effectiveActiveTools.join(', ')}
 
 User: ${userInput}`;
     const msgIndex = runState?.messages?.length || 0;
-    setContextSnapshots({ [msgIndex]: contextSnapshot });
+    setContextSnapshots(prev => ({ ...prev, [msgIndex]: contextSnapshot }));
     
     // Ingest phase
     setCurrentPhase('ingest');
