@@ -174,8 +174,8 @@ export class AgentRuntime {
         dangerouslyAllowBrowser: true,
       });
 
-      // Build messages with tools
-      const messages: { role: 'system' | 'user' | 'assistant'; content?: string; tool_calls?: unknown[]; tools?: unknown[] }[] = [
+        // Build messages with tools
+      const messages: { role: string; content?: string; tool_calls?: unknown[]; tools?: unknown[]; tool_call_id?: string }[] = [
         { role: 'system', content: options.prefix || 'You are a helpful AI assistant.' }
       ];
 
@@ -211,6 +211,10 @@ export class AgentRuntime {
         // @ts-expect-error - OpenAI SDK typing issue with dynamic params
         const stream = await openai.chat.completions.create(chatParams);
 
+        // Debug logging
+        console.log('[AgentRuntime] Calling model with tools:', tools.map(t => t.function.name));
+        console.log('[AgentRuntime] Messages:', JSON.stringify(messages, null, 2));
+
         await this.transition('receiving');
 
         let accumulatedContent = '';
@@ -228,14 +232,19 @@ export class AgentRuntime {
 
           if (delta?.tool_calls) {
             for (const tc of delta.tool_calls) {
-              if (!tc.id) {
-                // New tool call
-                toolCalls.push({ id: tc.id || '', name: tc.function?.name || '', arguments: tc.function?.arguments || '' });
-              } else {
-                // Append to existing tool call
-                const lastIdx = toolCalls.length - 1;
-                if (lastIdx >= 0) {
-                  toolCalls[lastIdx].arguments += tc.function?.arguments || '';
+              if (tc.id) {
+                // Check if this tool call already exists
+                const existingIdx = toolCalls.findIndex(existing => existing.id === tc.id);
+                if (existingIdx >= 0) {
+                  // Append to existing tool call
+                  toolCalls[existingIdx].arguments += tc.function?.arguments || '';
+                } else {
+                  // New tool call
+                  toolCalls.push({ 
+                    id: tc.id, 
+                    name: tc.function?.name || '', 
+                    arguments: tc.function?.arguments || '' 
+                  });
                 }
               }
             }
@@ -245,12 +254,28 @@ export class AgentRuntime {
 
         currentResponse = accumulatedContent;
 
+        console.log('[AgentRuntime] Finish reason:', finishReason);
+        console.log('[AgentRuntime] Tool calls received:', toolCalls);
+        console.log('[AgentRuntime] Content:', accumulatedContent);
+
         // Handle tool calls - if model requested tool calls, process them and continue loop
         if (toolCalls.length > 0 && finishReason === 'tool_calls') {
-          await this.transition('calling', { toolCalls });
+          // Add assistant message with tool calls first
+          messages.push({
+            role: 'assistant',
+            content: accumulatedContent,
+            tool_calls: toolCalls.map(tc => ({
+              id: tc.id,
+              type: 'function',
+              function: { name: tc.name, arguments: tc.arguments }
+            }))
+          });
+
+          await this.transition('calling', { toolCalls, message: 'Processing tool calls' });
 
           const toolResults: ToolCallResult[] = [];
 
+          // Process each tool call
           for (const tc of toolCalls) {
             let args = {};
             try {
@@ -259,6 +284,7 @@ export class AgentRuntime {
               args = {};
             }
 
+            // Execute the tool
             const result = await this.executeTool(tc.name, args, sandboxFiles);
             toolResults.push({
               toolCallId: tc.id,
@@ -267,21 +293,11 @@ export class AgentRuntime {
               result,
             });
 
-            // Add assistant message with tool calls
+            // Add tool result message - OpenAI expects specific format
             messages.push({
-              role: 'assistant',
-              content: accumulatedContent,
-              tool_calls: toolCalls.map(tc => ({
-                id: tc.id,
-                type: 'function',
-                function: { name: tc.name, arguments: tc.arguments }
-              }))
-            });
-
-            // Add tool result message
-            messages.push({
-              role: 'user',
-              content: JSON.stringify({ tool_call_id: tc.id, result })
+              role: 'tool',
+              tool_call_id: tc.id,
+              content: result
             });
 
             toolCallCount++;

@@ -957,14 +957,36 @@ Available tools: ${effectiveActiveTools.join(', ')}
 User: ${userInput}`;
     setContextSnapshots(prev => ({ ...prev, [0]: contextSnapshot }));
     
-    // Set up tool definitions for the agent
+    // Set up tool definitions for the agent with proper descriptions
+    const toolDescriptions: Record<string, string> = {
+      get_time: 'Returns the current system time including timestamp and timezone.',
+      list_files: 'Lists all files in the sandbox directory.',
+      read_file: 'Reads the content of a file in the sandbox. Requires filePath parameter.',
+      search_text: 'Searches for text matching a pattern in sandbox files. Requires pattern parameter.',
+    };
+    
     const toolDefs: AgentToolDefinition[] = effectiveActiveTools.map(toolName => {
+      let params: { type: string; properties: Record<string, object>; required?: string[] } = { type: 'object', properties: {} };
+      
+      if (toolName === 'read_file') {
+        params.properties = { filePath: { type: 'string', description: 'The path to the file to read' } };
+        params.required = ['filePath'];
+      } else if (toolName === 'search_text') {
+        params.properties = { 
+          pattern: { type: 'string', description: 'The text pattern to search for' },
+          dirPath: { type: 'string', description: 'Optional directory to search in' }
+        };
+        params.required = ['pattern'];
+      } else if (toolName === 'list_files') {
+        params.properties = { dirPath: { type: 'string', description: 'Optional directory path to list' } };
+      }
+      
       return {
         type: 'function',
         function: {
           name: toolName,
-          description: `Execute ${toolName}`,
-          parameters: { type: 'object', properties: {} },
+          description: toolDescriptions[toolName] || `Execute ${toolName}`,
+          parameters: params,
         },
       };
     });
@@ -1038,6 +1060,13 @@ User: ${userInput}`;
       maxToolCalls: activeRuntime.loopLimits.maxToolCalls,
     });
     
+    console.log('[RuntimePage] Starting run with:', {
+      profile: profile.name,
+      model: profile.model,
+      tools: effectiveActiveTools,
+      systemPrompt: activeRuntime.systemPrompt,
+    });
+    
     try {
       // Run the agent
       const result = await agent.run(
@@ -1081,6 +1110,7 @@ User: ${userInput}`;
       updateRuntime({ runState: finalRunState });
       
     } catch (err: any) {
+      console.error('[RuntimePage] Error:', err);
       // Handle error
       const errorTrace: TraceItem = {
         id: generateId(),
