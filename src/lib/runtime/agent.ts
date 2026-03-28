@@ -23,6 +23,12 @@ export interface ToolCallResult {
 export interface AgentOptions {
   tools?: ToolDefinition[];
   maxToolCalls?: number;
+  prompts?: {
+    system?: string;
+    plan?: string;
+    evaluate?: string;
+    respond?: string;
+  };
 }
 
 /**
@@ -144,12 +150,19 @@ export class AgentRuntime {
       this.trace = [];
       const tools = this.options.tools || [];
       const maxToolCalls = this.options.maxToolCalls || 10;
+      const prompts = this.options.prompts || {};
       let toolCallCount = 0;
 
-      // Build context
+      // Get phase-specific prompts
+      const systemPrompt = prompts.system || options.prefix || 'You are a helpful AI assistant.';
+      const planPrompt = prompts.plan || '';
+      const evaluatePrompt = prompts.evaluate || '';
+      const respondPrompt = prompts.respond || '';
+
+      // Build initial context
       let contextText = '';
-      if (options.prefixEnabled && options.prefix) {
-        contextText += `System: ${options.prefix}\n\n`;
+      if (options.prefixEnabled && systemPrompt) {
+        contextText += `System: ${systemPrompt}\n\n`;
       }
       
       const effectiveHistory = transcript.filter((_, idx) => {
@@ -174,10 +187,15 @@ export class AgentRuntime {
         dangerouslyAllowBrowser: true,
       });
 
-        // Build messages with tools
+      // Build messages with tools
       const messages: { role: string; content?: string; tool_calls?: unknown[]; tools?: unknown[]; tool_call_id?: string }[] = [
-        { role: 'system', content: options.prefix || 'You are a helpful AI assistant.' }
+        { role: 'system', content: systemPrompt }
       ];
+
+      // Add plan prompt as user message if defined
+      if (planPrompt) {
+        messages.push({ role: 'user', content: planPrompt });
+      }
 
       // Add transcript as conversation history
       for (const msg of effectiveHistory) {
@@ -303,6 +321,11 @@ export class AgentRuntime {
               content: result
             });
 
+            // Add evaluate prompt if defined
+            if (evaluatePrompt) {
+              messages.push({ role: 'user', content: evaluatePrompt });
+            }
+
             // Evaluate phase - evaluate the tool result
             await this.transition('evaluate', { toolCall: tc.name, result, toolCallCount: toolCallCount + 1 });
 
@@ -315,6 +338,11 @@ export class AgentRuntime {
 
         // No more tool calls, we're done
         break;
+      }
+
+      // Add respond prompt before final response if defined
+      if (respondPrompt && currentResponse) {
+        messages.push({ role: 'user', content: respondPrompt });
       }
 
       await this.transition('finished', { content: currentResponse, toolCallCount });

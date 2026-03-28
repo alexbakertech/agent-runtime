@@ -231,6 +231,12 @@ export function createDefaultRuntimeState(): RuntimeState {
     id: generateId(),
     name: 'Default Runtime',
     systemPrompt: 'You are a helpful AI assistant.',
+    prompts: {
+      system: 'You are a helpful AI assistant with access to tools.',
+      plan: 'Analyze the user request and determine the best action. Available actions: respond directly, call a tool, or ask for clarification.',
+      evaluate: 'Evaluate the tool result and determine if more actions are needed or if ready to respond.',
+      respond: 'Generate a helpful, concise response to the user based on the conversation context.',
+    },
     modelConfig: {
       model: 'gpt-4',
       temperature: 0.7,

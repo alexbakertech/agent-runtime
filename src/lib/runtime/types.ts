@@ -47,6 +47,12 @@ export interface Runtime {
   id: string;
   name: string;
   systemPrompt: string;
+  prompts: {
+    system: string;
+    plan: string;
+    evaluate: string;
+    respond: string;
+  };
   modelConfig: {
     model: string;
     temperature: number;
