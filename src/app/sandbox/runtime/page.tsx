@@ -480,6 +480,7 @@ function ChatWorkspace({
   showThinking,
   thinking,
   canSubmit,
+  contextSnapshots,
 }: {
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
   input: string;
@@ -492,8 +493,10 @@ function ChatWorkspace({
   showThinking: boolean;
   thinking: string;
   canSubmit: boolean;
+  contextSnapshots: Record<number, string>;
 }) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [viewingSnapshotIndex, setViewingSnapshotIndex] = useState<number | null>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -501,61 +504,111 @@ function ChatWorkspace({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
-        {messages.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '3rem', color: '#94a3b8' }}>
-            <div style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '0.5rem' }}>Chat Workspace</div>
-            <div style={{ fontSize: '0.85rem' }}>Send a message to start a run</div>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {messages.map((msg, i) => (
-              <div
-                key={i}
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                }}
-              >
-                <div
-                  style={{
-                    maxWidth: '80%',
-                    padding: '0.75rem 1rem',
-                    borderRadius: '12px',
-                    backgroundColor: msg.role === 'user' ? '#3b82f6' : '#f1f5f9',
-                    color: msg.role === 'user' ? '#fff' : '#1a1a1a',
-                    fontSize: '0.9rem',
-                    whiteSpace: 'pre-wrap',
-                  }}
-                >
-                  {msg.content}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '2rem' }}>
+        <div style={{ maxWidth: '700px', margin: '0 auto' }}>
+          {messages.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '3rem', color: '#94a3b8' }}>
+              <div style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '0.5rem' }}>Chat Workspace</div>
+              <div style={{ fontSize: '0.85rem' }}>Send a message to start a run</div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2.5rem' }}>
+              {messages.map((msg, i) => {
+                const isUser = msg.role === 'user';
+                const showSnapshot = viewingSnapshotIndex === i;
+                
+                return (
+                  <div key={i} style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
+                    <div style={{ 
+                      backgroundColor: isUser ? '#3b82f6' : '#1e293b', 
+                      color: 'white', 
+                      width: '24px', 
+                      height: '24px', 
+                      borderRadius: '4px', 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      justifyContent: 'center', 
+                      fontWeight: 800, 
+                      fontSize: '0.65rem', 
+                      flexShrink: 0, 
+                      marginTop: '4px' 
+                    }}>
+                      {isUser ? 'U' : 'AI'}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ 
+                        whiteSpace: 'pre-wrap', 
+                        lineHeight: 1.6, 
+                        fontSize: '0.95rem', 
+                        color: '#334155'
+                      }}>
+                        {msg.content}
+                      </div>
+                      
+                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', marginTop: '0.5rem' }}>
+                        {isUser && contextSnapshots[i] && (
+                          <button 
+                            onClick={() => setViewingSnapshotIndex(showSnapshot ? null : i)}
+                            style={{ fontSize: '0.65rem', color: '#3b82f6', background: 'none', border: '1px solid #bfdbfe', borderRadius: '4px', padding: '0.2rem 0.4rem', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                          >
+                            {showSnapshot ? 'HIDE CONTEXT' : 'VIEW CONTEXT'}
+                          </button>
+                        )}
+                      </div>
+
+                      {showSnapshot && isUser && contextSnapshots[i] && (
+                        <div style={{ marginTop: '1rem', padding: '1rem', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+                          <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', marginBottom: '0.5rem', textTransform: 'uppercase' }}>Turn Context Snapshot:</div>
+                          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontSize: '0.8rem', fontFamily: 'monospace', color: '#475569' }}>
+                            {contextSnapshots[i]}
+                          </pre>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              
+              {showThinking && thinking && (
+                <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
+                  <div style={{ 
+                    backgroundColor: '#1e293b', 
+                    color: 'white', 
+                    width: '24px', 
+                    height: '24px', 
+                    borderRadius: '4px', 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'center', 
+                    fontWeight: 800, 
+                    fontSize: '0.65rem', 
+                    flexShrink: 0, 
+                    marginTop: '4px' 
+                  }}>
+                    AI
+                  </div>
+                  <div
+                    style={{
+                      flex: 1,
+                      whiteSpace: 'pre-wrap',
+                      lineHeight: 1.6,
+                      fontSize: '0.95rem',
+                      color: '#78350f',
+                      fontStyle: 'italic',
+                      backgroundColor: '#fef3c7',
+                      padding: '0.75rem 1rem',
+                      borderRadius: '8px',
+                    }}
+                  >
+                    💭 {thinking}
+                  </div>
                 </div>
-              </div>
-            ))}
-            
-            {showThinking && thinking && (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                <div
-                  style={{
-                    maxWidth: '80%',
-                    padding: '0.75rem 1rem',
-                    borderRadius: '12px',
-                    backgroundColor: '#fef3c7',
-                    color: '#78350f',
-                    fontSize: '0.85rem',
-                    fontStyle: 'italic',
-                    whiteSpace: 'pre-wrap',
-                  }}
-                >
-                  💭 {thinking}
-                </div>
-              </div>
-            )}
-            
-            <div ref={messagesEndRef} />
-          </div>
-        )}
+              )}
+              
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+        </div>
       </div>
 
       <CollapsibleSection title="Tool Controls" defaultExpanded={false}>
@@ -575,40 +628,50 @@ function ChatWorkspace({
         </div>
       </CollapsibleSection>
 
-      <div style={{ padding: '1rem', borderTop: '1px solid #e2e8f0' }}>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => onInputChange(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && canSubmit && onSubmit()}
-            placeholder="Type your message..."
-            disabled={isRunning}
-            style={{
-              flex: 1,
-              padding: '0.75rem 1rem',
-              border: '1px solid #e2e8f0',
-              borderRadius: '8px',
-              fontSize: '0.9rem',
-              backgroundColor: '#fff',
-            }}
-          />
-          <button
-            onClick={onSubmit}
-            disabled={!canSubmit || isRunning}
-            style={{
-              padding: '0.75rem 1.5rem',
-              backgroundColor: !canSubmit || isRunning ? '#cbd5e1' : '#10b981',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '8px',
-              fontSize: '0.9rem',
-              fontWeight: 600,
-              cursor: !canSubmit || isRunning ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {isRunning ? 'Running...' : 'Send'}
-          </button>
+      <div style={{ padding: '2rem', borderTop: '1px solid #e2e8f0' }}>
+        <div style={{ maxWidth: '700px', margin: '0 auto' }}>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <textarea
+              value={input}
+              onChange={(e) => onInputChange(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (canSubmit) onSubmit(); } }}
+              placeholder="Send message to model..."
+              disabled={isRunning}
+              rows={1}
+              style={{
+                flex: 1,
+                padding: '1rem',
+                border: '1px solid #e2e8f0',
+                borderRadius: '12px',
+                fontSize: '0.95rem',
+                backgroundColor: isRunning ? '#f8fafc' : '#fff',
+                resize: 'none',
+                outline: 'none',
+                minHeight: '52px',
+              }}
+            />
+            <button
+              onClick={onSubmit}
+              disabled={!canSubmit || isRunning}
+              style={{
+                padding: '0 1rem',
+                backgroundColor: !canSubmit || isRunning ? '#cbd5e1' : '#0f172a',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '6px',
+                fontSize: '0.9rem',
+                fontWeight: 600,
+                cursor: !canSubmit || isRunning ? 'not-allowed' : 'pointer',
+                width: '52px',
+                height: '52px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              ↑
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -723,6 +786,7 @@ export default function RuntimeBuilder() {
   const [thinking, setThinking] = useState('');
   const [activeToolsOverride, setActiveToolsOverride] = useState<string[]>([]);
   const [sandboxFiles, setSandboxFiles] = useState<FileEntry[]>([]);
+  const [contextSnapshots, setContextSnapshots] = useState<Record<number, string>>({});
   
   const runState = runtime.runState;
   const activeRuntime = runtime.activeRuntimeId ? runtime.runtimes[runtime.activeRuntimeId] : null;
@@ -875,6 +939,15 @@ export default function RuntimeBuilder() {
     };
     
     updateRuntime({ runState: newRunState });
+    
+    // Generate context snapshot for user message
+    const contextSnapshot = `System: ${activeRuntime.systemPrompt}
+
+Available tools: ${effectiveActiveTools.join(', ')}
+
+User: ${userInput}`;
+    const msgIndex = runState?.messages?.length || 0;
+    setContextSnapshots({ [msgIndex]: contextSnapshot });
     
     // Ingest phase
     setCurrentPhase('ingest');
@@ -1029,6 +1102,7 @@ export default function RuntimeBuilder() {
           showThinking={!!activeRuntime?.displayConfig.showThinking}
           thinking={thinking}
           canSubmit={canSubmit}
+          contextSnapshots={contextSnapshots}
         />
       </main>
       
