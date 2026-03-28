@@ -347,12 +347,15 @@ function SandboxView({
   files, 
   onUpload, 
   onDeleteFile,
+  onRefresh,
 }: { 
   files: FileEntry[];
   onUpload: (files: FileList) => void;
   onDeleteFile: (path: string) => void;
+  onRefresh: () => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const [selectedFile, setSelectedFile] = useState<string>('');
   const [fileContent, setFileContent] = useState<string>('');
 
@@ -366,105 +369,119 @@ function SandboxView({
     }
   };
 
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = () => {
+    setIsDragging(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    
+    const items = e.dataTransfer.items;
+    if (items && items.length > 0) {
+      const fileList: File[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i].webkitGetAsEntry?.();
+        if (item) {
+          // Handle files recursively
+          const files = await getFilesFromEntry(item);
+          fileList.push(...files);
+        }
+      }
+      if (fileList.length > 0) {
+        const dt = new DataTransfer();
+        fileList.forEach(f => dt.items.add(f));
+        onUpload(dt.files);
+      }
+    }
+  };
+
+  const getFilesFromEntry = async (entry: FileSystemEntry, path: string = ''): Promise<File[]> => {
+    const files: File[] = [];
+    if (entry.isFile) {
+      const fileEntry = entry as FileSystemFileEntry;
+      const file = await new Promise<File>((resolve) => fileEntry.file(resolve));
+      const filePath = path ? `${path}/${file.name}` : file.name;
+      files.push(new File([file], filePath));
+    } else if (entry.isDirectory) {
+      const dirEntry = entry as FileSystemDirectoryEntry;
+      const reader = dirEntry.createReader();
+      const entries = await new Promise<FileSystemEntry[]>((resolve) => reader.readEntries(resolve));
+      const dirPath = path ? `${path}/${entry.name}` : entry.name;
+      for (const childEntry of entries) {
+        files.push(...await getFilesFromEntry(childEntry, dirPath));
+      }
+    }
+    return files;
+  };
+
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-        <h3 style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b', margin: 0 }}>
-          SANDBOX
-        </h3>
-        <div style={{ display: 'flex', gap: '0.25rem' }}>
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={(e) => e.target.files && onUpload(e.target.files)}
-            multiple
-            style={{ display: 'none' }}
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            style={{
-              padding: '0.2rem 0.4rem',
-              backgroundColor: '#3b82f6',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '4px',
-              fontSize: '0.65rem',
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            + Upload
-          </button>
-        </div>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem', borderBottom: '1px solid #e2e8f0', backgroundColor: '#fcfcfc' }}>
+        <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800, color: '#1e293b' }}>SANDBOX FILES</h2>
+        <button onClick={onRefresh} style={{ border: '1px solid #e2e8f0', backgroundColor: '#fff', cursor: 'pointer', fontSize: '0.65rem', padding: '0.2rem 0.4rem', borderRadius: '4px' }}>
+          Refresh
+        </button>
       </div>
       
-      {files.length === 0 ? (
-        <div style={{ fontSize: '0.8rem', color: '#94a3b8', padding: '1rem', textAlign: 'center' }}>
-          No files in sandbox<br />
-          <span style={{ fontSize: '0.7rem' }}>Click Upload to add files</span>
-        </div>
-      ) : (
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <div style={{ flex: 1, fontSize: '0.75rem', fontFamily: 'monospace', maxHeight: '150px', overflowY: 'auto' }}>
-            {files.map((file) => (
-              <div 
-                key={file.path} 
-                style={{ 
-                  padding: '0.25rem 0', 
-                  borderBottom: '1px solid #e2e8f0',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}
-              >
-                <span 
-                  onClick={() => handleFileClick(file.path)}
-                  style={{ cursor: 'pointer', flex: 1 }}
-                >
-                  {file.type === 'directory' ? '📁 ' : '📄 '}{file.path}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          {files.map((file) => (
+            <div key={file.path} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem', backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', overflow: 'hidden' }}>
+                <span style={{ fontSize: '0.65rem', padding: '0.1rem 0.3rem', backgroundColor: file.type === 'directory' ? '#fef3c7' : '#dbeafe', color: file.type === 'directory' ? '#92400e' : '#1e40af', borderRadius: '3px', fontWeight: 600 }}>
+                  {file.type === 'directory' ? 'DIR' : 'FILE'}
                 </span>
-                <button
-                  onClick={() => onDeleteFile(file.path)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: '#94a3b8',
-                    cursor: 'pointer',
-                    fontSize: '0.8rem',
-                    padding: '0 0.25rem',
-                  }}
-                  title="Delete file"
-                >
-                  ×
-                </button>
+                <span style={{ fontSize: '0.75rem', color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis' }}>{file.path}</span>
               </div>
-            ))}
-          </div>
+              <button onClick={() => onDeleteFile(file.path)} style={{ border: 'none', background: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '0.7rem' }}>Delete</button>
+            </div>
+          ))}
+          {files.length === 0 && (
+            <div style={{ padding: '1rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.75rem', border: '1px dashed #e2e8f0', borderRadius: '6px' }}>
+              No files in sandbox.
+            </div>
+          )}
         </div>
-      )}
+      </div>
 
-      {selectedFile && (
-        <div style={{ marginTop: '0.5rem' }}>
-          <div style={{ fontSize: '0.7rem', fontWeight: 600, color: '#64748b', marginBottom: '0.25rem' }}>
-            {selectedFile}
-          </div>
-          <textarea
-            value={fileContent}
-            readOnly
-            rows={4}
-            style={{
-              width: '100%',
-              padding: '0.5rem',
-              border: '1px solid #e2e8f0',
-              borderRadius: '4px',
-              fontSize: '0.7rem',
-              fontFamily: 'monospace',
-              resize: 'vertical',
-              backgroundColor: '#f8fafc',
-            }}
-          />
+      {/* DROP ZONE */}
+      <div 
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        onClick={() => fileInputRef.current?.click()}
+        style={{ 
+          margin: '1rem',
+          padding: '1.5rem',
+          border: `2px dashed ${isDragging ? '#3b82f6' : '#e2e8f0'}`,
+          borderRadius: '8px',
+          backgroundColor: isDragging ? '#eff6ff' : '#fff',
+          cursor: 'pointer',
+          textAlign: 'center',
+          transition: 'all 0.2s'
+        }}
+      >
+        <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.5rem' }}>
+          Drop files here or click to browse
         </div>
-      )}
+        <div style={{ fontSize: '0.65rem', color: '#94a3b8' }}>
+          Supports files and folders
+        </div>
+        <input 
+          ref={fileInputRef}
+          type="file" 
+          multiple
+          {...({ webkitdirectory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
+          onChange={(e) => e.target.files && onUpload(e.target.files)}
+          style={{ display: 'none' }} 
+        />
+      </div>
     </div>
   );
 }
@@ -1230,11 +1247,12 @@ User: ${userInput}`;
           onProfileChange={(id) => handleRuntimeChange({ profileId: id })}
         />
         
-        <div style={{ marginTop: '1.5rem' }}>
+        <div style={{ marginTop: '1.5rem', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
           <SandboxView 
             files={sandboxFiles} 
             onUpload={handleUploadFiles}
             onDeleteFile={handleDeleteFile}
+            onRefresh={loadSandboxFiles}
           />
         </div>
       </aside>
