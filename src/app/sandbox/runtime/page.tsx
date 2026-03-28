@@ -898,13 +898,18 @@ export default function RuntimeBuilder() {
   };
 
   const handleUploadFiles = async (files: FileList) => {
+    console.log('[Runtime] Uploading files:', files.length);
     try {
       for (let i = 0; i < files.length; i++) {
+        console.log('[Runtime] Uploading:', files[i].name, files[i].size, 'bytes');
         await uploadFile(files[i]);
+        console.log('[Runtime] Uploaded:', files[i].name);
       }
       await loadSandboxFiles();
+      console.log('[Runtime] Files after upload:', sandboxFiles.length);
     } catch (err) {
-      console.error('Failed to upload files:', err);
+      console.error('[Runtime] Failed to upload files:', err);
+      alert(`Failed to upload: ${err}`);
     }
   };
 
