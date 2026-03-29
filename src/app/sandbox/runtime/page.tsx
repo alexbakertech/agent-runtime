@@ -1,5 +1,19 @@
 'use client';
 
+/**
+ * Runtime Builder Page - Agent Runtime Configuration
+ * 
+ * Features:
+ * - Runtime Management: Create, edit, delete runtimes
+ * - Runtime Configuration: Model, prompts, tools, limits
+ * - Sandbox Files: File management for runtime
+ * - Chat Workspace: Test runtime with messages
+ * - Execution Trace: Visual pipeline of agent phases
+ * 
+ * Create and configure complete agent runtimes with
+ * custom tools, prompts, and execution settings.
+ */
+
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRuntime, useProfiles, useSandbox } from '@/lib/state';
 import type { Runtime, RunPhase, TraceItem, ToolCall, RunState, ToolDefinition } from '@/lib/runtime/types';
@@ -7,6 +21,9 @@ import { AgentRuntime, type ToolDefinition as AgentToolDefinition } from '@/lib/
 import { listFiles, deleteFile, uploadFile, readFile } from '@/lib/tools/file-storage';
 import type { FileEntry } from '@/lib/tools/file-storage';
 
+/* ============================================
+   HELPER FUNCTIONS
+   ============================================ */
 function generateId(): string {
   return `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 }
@@ -1195,8 +1212,17 @@ User: ${userInput}`;
 
   const canSubmit = !!activeProfile && !!input.trim() && !isRunning;
 
+  /* ============================================
+     RENDER
+     ============================================ */
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 60px)', fontFamily: 'system-ui', color: '#1a1a1a', backgroundColor: '#fdfdfd' }}>
+      {/* ========================================
+         LEFT PANEL: Runtime Configuration & Sandbox
+         - Runtime selector
+         - Runtime editor (name, profile, tools, limits)
+         - Sandbox files
+         ======================================== */}
       {/* Left Panel - Runtime + Sandbox */}
       <aside style={{ width: '300px', backgroundColor: '#f8fafc', borderRight: '1px solid #e2e8f0', padding: '1rem', overflowY: 'auto' }}>
         <RuntimeSelector
@@ -1227,6 +1253,12 @@ User: ${userInput}`;
         </div>
       </aside>
       
+      {/* ========================================
+         CENTER PANEL: Chat Workspace
+         - Message display
+         - Thinking stream
+         - Message input
+         ======================================== */}
       {/* Center Panel - Chat Workspace */}
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: '1px solid #e2e8f0' }}>
         <ChatWorkspace
@@ -1242,6 +1274,12 @@ User: ${userInput}`;
         />
       </main>
       
+      {/* ========================================
+         RIGHT PANEL: Execution Trace
+         - Phase display (ingest, plan, act, evaluate, respond)
+         - Tool call details
+         - Response streaming
+         ======================================== */}
       {/* Right Panel - Execution Trace */}
       <aside style={{ width: '340px', backgroundColor: '#fafafa', padding: '1rem', overflowY: 'auto' }}>
         <ExecutionTrace

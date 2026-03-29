@@ -1,9 +1,27 @@
 'use client';
 
+/**
+ * Prompts Builder Page - Runtime Prompt Configuration
+ * 
+ * Features:
+ * - Runtime Selection: Choose which runtime to configure
+ * - Prompt Editor: Edit prompts for each execution phase
+ * - Prompt Preview: Live preview of all prompts
+ * 
+ * Configure prompts for different phases of the agentic loop:
+ * - System: Base assistant behavior
+ * - Plan: Before model decides action
+ * - Evaluate: After tool execution
+ * - Respond: When generating final response
+ */
+
 import { useState } from 'react';
 import { useRuntime } from '@/lib/state';
 import type { Runtime } from '@/lib/runtime/types';
 
+/* ============================================
+   HELPER FUNCTIONS
+   ============================================ */
 function generateId(): string {
   return `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 }
@@ -96,8 +114,16 @@ export default function PromptsBuilder() {
     { key: 'respond', label: 'Respond Prompt', description: 'Prompt used when generating the final response' },
   ];
 
+  /* ============================================
+     RENDER
+     ============================================ */
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 60px)', fontFamily: 'system-ui', backgroundColor: '#fdfdfd' }}>
+      {/* ========================================
+         LEFT PANEL: Runtime Selector
+         - List of runtimes
+         - Create/delete runtimes
+         ======================================== */}
       {/* Left Panel - Runtime Selector */}
       <aside style={{ width: '280px', backgroundColor: '#f8fafc', borderRight: '1px solid #e2e8f0', padding: '1rem', overflowY: 'auto' }}>
         <div style={{ marginBottom: '1.5rem' }}>
@@ -163,6 +189,13 @@ export default function PromptsBuilder() {
         </div>
       </aside>
 
+      {/* ========================================
+         CENTER PANEL: Prompt Editor
+         - System Prompt editor
+         - Plan Prompt editor
+         - Evaluate Prompt editor
+         - Respond Prompt editor
+         ======================================== */}
       {/* Center Panel - Prompt Editor */}
       <main style={{ flex: 1, padding: '2rem', overflowY: 'auto' }}>
         {!activeRuntime ? (
@@ -214,6 +247,11 @@ export default function PromptsBuilder() {
         )}
       </main>
 
+      {/* ========================================
+         RIGHT PANEL: Prompt Preview
+         - Live preview of prompts by phase
+         - Color-coded by execution phase
+         ======================================== */}
       {/* Right Panel - Preview */}
       {activeRuntime && (
         <aside style={{ width: '360px', backgroundColor: '#f8fafc', borderLeft: '1px solid #e2e8f0', padding: '1rem', overflowY: 'auto' }}>

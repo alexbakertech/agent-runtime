@@ -3,10 +3,22 @@ import "./globals.css";
 import Link from 'next/link';
 import { StateProvider } from '@/lib/state';
 
+/**
+ * Application Metadata
+ */
 export const metadata: Metadata = {
   title: "Agent Runtime",
   description: "Local-first agent runtime",
 };
+
+/**
+ * Root Layout - Application Shell
+ * 
+ * Provides:
+ * - Navigation bar with links to all pages
+ * - StateProvider for global state management
+ * - Consistent layout across all pages
+ */
 
 export default function RootLayout({
   children,
@@ -16,6 +28,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body style={{ margin: 0, padding: 0 }}>
+        {/* ========================================
+             NAVIGATION BAR
+             Links to all application pages
+             ======================================== */}
         <nav style={{ 
           height: '60px', 
           backgroundColor: '#0f172a', 

@@ -1,9 +1,26 @@
 'use client';
 
+/**
+ * Configure & Test Page - API Profile Management
+ * 
+ * Features:
+ * - Profile Management: Create, edit, delete API configurations
+ * - Connection Testing: Verify profile works with API
+ * - Model Fetching: Retrieve available models from endpoint
+ * - Test Chat: Send messages to verify configuration
+ * - Settings: Browser API consent, retry configuration
+ * 
+ * This page handles all API configuration for the application.
+ */
+
 import { useState, useEffect, useRef } from 'react';
 import { testConnection, fetchModels, chatStreamWithReasoning, isBrowserConsentGiven, BrowserConsentRequiredError } from '@/lib/api/client';
 import { useProfiles, useBrowserConsent, useRetryEnabled } from '@/lib/state';
 
+/**
+ * Profile configuration interface
+ * Represents an API profile with connection details
+ */
 interface Config {
   name: string;
   baseUrl: string;
@@ -268,9 +285,15 @@ export default function Home() {
     </div>
   );
 
+  /* ============================================
+     RENDER
+     ============================================ */
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 60px)', fontFamily: 'system-ui', color: '#1a1a1a', backgroundColor: '#fdfdfd' }}>
       
+      {/* ========================================
+         LEFT SIDEBAR: Profile & Configuration
+         ======================================== */}
       <aside style={{ 
         width: '320px', 
         backgroundColor: '#f8fafc', 
@@ -399,6 +422,9 @@ export default function Home() {
         </div>
       </aside>
 
+      {/* ========================================
+         MAIN CONTENT: Test Chat Interface
+         ======================================== */}
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
         <div style={{ flex: 1, overflowY: 'auto', padding: '3rem' }}>
           <div style={{ maxWidth: '800px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2.5rem' }}>
