@@ -1,5 +1,19 @@
 'use client';
 
+/**
+ * State Context - React Context API State Management
+ * 
+ * Provides centralized state management for the entire application:
+ * - Profiles: API configuration storage
+ * - Global Settings: Application preferences
+ * - Context Engine: Chat Agent state (transcript, overrides)
+ * - Sandbox: Tools and files
+ * - Runtime: Runtime configurations
+ * 
+ * All state is persisted to localStorage for session persistence.
+ * Uses React Context for dependency injection into components.
+ */
+
 import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 import type { AppState, Profile, GlobalSettings, ContextEngineState, SandboxState, ChatAgentAppState, ChatAgentUIState, SandboxAppState, SandboxUIState, RuntimeSpecState, RuntimeState } from './types';
 import { createDefaultState, createDefaultProfile, createDefaultContextEngineState, createDefaultSandboxState, createDefaultChatAgentAppState, createDefaultChatAgentUIState, createDefaultSandboxAppState, createDefaultSandboxUIState, createDefaultRuntimeSpecAppState, createDefaultRuntimeState, createEmptyRunState } from './defaults';
