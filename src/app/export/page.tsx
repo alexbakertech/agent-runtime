@@ -1,10 +1,25 @@
 'use client';
 
+/**
+ * State Page - Export/Import/Reset Application State
+ * 
+ * Features:
+ * - Export: Save application state to JSON file
+ * - Import: Load state from JSON file with preview
+ * - Reset: Clear state to defaults
+ * - Edit: Modify JSON before export/import
+ * 
+ * Provides state management for backup and restoration.
+ */
+
 import { useState, useCallback, useMemo } from 'react';
 import { useAppState } from '@/lib/state';
 import { createExportOptions, getExportSummary } from '@/lib/state/export';
 import type { ExportOptions, ImportPreview, AppState } from '@/lib/state/types';
 
+/**
+ * Masks API keys in state for secure display/export
+ */
 function maskApiKeys(state: AppState): AppState {
   return {
     ...state,
@@ -98,8 +113,14 @@ export default function ExportPage() {
     reader.readAsText(file);
   }, []);
 
+  /* ============================================
+     RENDER
+     ============================================ */
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 60px)', fontFamily: 'system-ui', color: '#1a1a1a', backgroundColor: '#fdfdfd' }}>
+      {/* ========================================
+         LEFT SIDEBAR: Export/Import/Reset Controls
+         ======================================== */}
       <aside style={{ width: '320px', backgroundColor: '#f8fafc', borderRight: '1px solid #e2e8f0', padding: '1.5rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
         <div style={{ backgroundColor: '#fff', padding: '1.25rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
           <h2 style={{ fontSize: '0.8rem', fontWeight: 700, marginBottom: '1rem', color: '#64748b' }}>EXPORT OPTIONS</h2>
@@ -170,6 +191,9 @@ export default function ExportPage() {
         </div>
       </aside>
 
+      {/* ========================================
+         MAIN CONTENT: Current State Display
+         ======================================== */}
       <main style={{ flex: 1, padding: '1.5rem', overflowY: 'auto' }}>
         <div style={{ backgroundColor: '#fff', padding: '1.25rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>

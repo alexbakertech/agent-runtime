@@ -1,7 +1,23 @@
 'use client';
 
+/**
+ * Home Page - Application Navigation Hub
+ * 
+ * Features:
+ * - Navigation links to all application sections
+ * - Quick start guide (3-step onboarding)
+ * - About section describing app purpose
+ * 
+ * This is the entry point for the Agent Runtime application.
+ * Provides centralized access to all major features.
+ */
+
 import Link from 'next/link';
 
+/**
+ * Navigation configuration for all application pages
+ * Each entry defines: href, title, description, icon, and color
+ */
 const pages = [
   {
     href: '/chat-agent',
@@ -41,8 +57,14 @@ const pages = [
 ];
 
 export default function Home() {
+  /* ============================================
+     RENDER
+     ============================================ */
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 60px)', fontFamily: 'system-ui', color: '#1a1a1a', backgroundColor: '#fdfdfd' }}>
+      {/* ========================================
+         LEFT SIDEBAR: Quick Start & About
+         ======================================== */}
       <aside style={{ width: '320px', backgroundColor: '#f8fafc', borderRight: '1px solid #e2e8f0', padding: '1.5rem', overflowY: 'auto' }}>
         <div style={{ backgroundColor: '#fff', padding: '1.25rem', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '1.5rem' }}>
           <h2 style={{ fontSize: '0.8rem', fontWeight: 700, color: '#64748b', marginBottom: '0.75rem' }}>QUICK START</h2>
@@ -61,6 +83,9 @@ export default function Home() {
         </div>
       </aside>
 
+      {/* ========================================
+         MAIN CONTENT: Page Navigation Cards
+         ======================================== */}
       <main style={{ flex: 1, padding: '2rem', overflowY: 'auto' }}>
         <h1 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '0.5rem' }}>Welcome to Agent Runtime</h1>
         <p style={{ color: '#64748b', marginBottom: '2rem', fontSize: '0.9rem' }}>Select a section to get started</p>

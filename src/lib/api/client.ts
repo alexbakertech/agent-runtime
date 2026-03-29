@@ -1,5 +1,20 @@
+/**
+ * API Client Module - OpenAI SDK Integration
+ * 
+ * Handles direct API communication from the browser:
+ * - OpenAI SDK integration for chat completions
+ * - Streaming support for responses and reasoning
+ * - Retry logic with exponential backoff
+ * - Browser consent management
+ * 
+ * Supports OpenAI-compatible APIs (OpenAI, Ollama, LM Studio, etc.)
+ */
+
 import { OpenAI } from 'openai';
 
+/**
+ * API configuration interface
+ */
 export interface ApiConfig {
   baseUrl: string;
   apiKey: string;

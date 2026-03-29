@@ -1,8 +1,22 @@
 'use client';
 
+/**
+ * State Context - React Context API State Management
+ * 
+ * Provides centralized state management for the entire application:
+ * - Profiles: API configuration storage
+ * - Global Settings: Application preferences
+ * - Context Engine: Chat Agent state (transcript, overrides)
+ * - Sandbox: Tools and files
+ * - Runtime: Runtime configurations
+ * 
+ * All state is persisted to localStorage for session persistence.
+ * Uses React Context for dependency injection into components.
+ */
+
 import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
-import type { AppState, Profile, GlobalSettings, ContextEngineState, SandboxState, ChatAgentAppState, ChatAgentUIState, SandboxAppState, SandboxUIState, RuntimeSpecState } from './types';
-import { createDefaultState, createDefaultProfile, createDefaultContextEngineState, createDefaultSandboxState, createDefaultChatAgentAppState, createDefaultChatAgentUIState, createDefaultSandboxAppState, createDefaultSandboxUIState, createDefaultRuntimeSpecAppState } from './defaults';
+import type { AppState, Profile, GlobalSettings, ContextEngineState, SandboxState, ChatAgentAppState, ChatAgentUIState, SandboxAppState, SandboxUIState, RuntimeSpecState, RuntimeState } from './types';
+import { createDefaultState, createDefaultProfile, createDefaultContextEngineState, createDefaultSandboxState, createDefaultChatAgentAppState, createDefaultChatAgentUIState, createDefaultSandboxAppState, createDefaultSandboxUIState, createDefaultRuntimeSpecAppState, createDefaultRuntimeState, createEmptyRunState } from './defaults';
 import { loadState, saveState, exportCurrentState } from './storage';
 import { exportState, createExportOptions, generateExportFilename, downloadExport } from './export';
 import { previewImport, applyImport, validateImportJson } from './import';
@@ -43,6 +57,13 @@ interface StateContextValue {
   
   runtimeSpec: RuntimeSpecState;
   updateRuntimeSpec: (updates: Partial<RuntimeSpecState>) => void;
+  
+  // Runtime (v0.1)
+  runtime: RuntimeState;
+  updateRuntime: (updates: Partial<RuntimeState>) => void;
+  setActiveRuntime: (id: string | null) => void;
+  startRun: (userInput: string) => void;
+  stopRun: () => void;
   
   // Reset
   resetToDefaults: (keepProfiles?: boolean) => void;
@@ -307,6 +328,51 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  // Runtime state (v0.1)
+  const defaultRuntime = createDefaultRuntimeState();
+  const runtimeAppState = state?.pageAppStates?.runtime;
+  const runtime: RuntimeState = runtimeAppState
+    ? { ...defaultRuntime, ...runtimeAppState }
+    : defaultRuntime;
+
+  const updateRuntime = useCallback((updates: Partial<RuntimeState>) => {
+    setState(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        pageAppStates: {
+          ...prev.pageAppStates,
+          runtime: { ...prev.pageAppStates?.runtime, ...updates } as RuntimeState,
+        },
+      };
+    });
+  }, []);
+
+  const setActiveRuntime = useCallback((id: string | null) => {
+    updateRuntime({ activeRuntimeId: id });
+  }, [updateRuntime]);
+
+  const startRun = useCallback((userInput: string) => {
+    const activeRuntime = runtime.activeRuntimeId ? runtime.runtimes[runtime.activeRuntimeId] : null;
+    if (!activeRuntime) return;
+    
+    const newRunState = createEmptyRunState(activeRuntime.id);
+    newRunState.messages = [{ role: 'user', content: userInput }];
+    newRunState.activeTools = activeRuntime.defaultTools;
+    newRunState.phase = 'ingest';
+    newRunState.status = 'running';
+    
+    updateRuntime({ runState: newRunState });
+  }, [runtime.activeRuntimeId, runtime.runtimes, updateRuntime]);
+
+  const stopRun = useCallback(() => {
+    if (runtime.runState) {
+      updateRuntime({
+        runState: { ...runtime.runState, status: 'completed' }
+      });
+    }
+  }, [runtime.runState, updateRuntime]);
+
   // Reset
   const resetToDefaults = useCallback((keepProfiles: boolean = true) => {
     setState(prev => {
@@ -380,6 +446,11 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
     updateSandbox,
     runtimeSpec,
     updateRuntimeSpec,
+    runtime,
+    updateRuntime,
+    setActiveRuntime,
+    startRun,
+    stopRun,
     resetToDefaults,
     getExportData,
     downloadExportFile,
@@ -437,4 +508,9 @@ export function useRetryEnabled() {
 export function useRuntimeSpec() {
   const { runtimeSpec, updateRuntimeSpec } = useAppState();
   return { runtimeSpec, updateRuntimeSpec };
+}
+
+export function useRuntime() {
+  const { runtime, updateRuntime, setActiveRuntime, startRun, stopRun } = useAppState();
+  return { runtime, updateRuntime, setActiveRuntime, startRun, stopRun };
 }

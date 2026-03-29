@@ -1,5 +1,18 @@
 'use client';
 
+/**
+ * Tools Sandbox Page - Tool Development and Testing
+ * 
+ * Features:
+ * - Tool Registry: Built-in and custom tools
+ * - Tool Editor: Name, description, code, parameters
+ * - Tool Execution: Validate and run tools with trace
+ * - Sandbox Files: Upload, browse, delete files
+ * 
+ * Environment for building and testing custom tools
+ * that can be used by the agent runtime.
+ */
+
 import { useState, useEffect, useRef, useCallback, DragEvent } from 'react';
 import { useSandbox, CustomTool } from '@/lib/state';
 import { toolDefinitions } from '@/lib/tools/definitions';
@@ -17,6 +30,9 @@ import {
 } from '@/lib/tools/file-storage';
 import { searchInFiles } from '@/lib/tools/file-walker';
 
+/* ============================================
+   TYPE DEFINITIONS
+   ============================================ */
 type ExecutionStep = {
   label: string;
   status: 'info' | 'success' | 'error';
@@ -723,9 +739,19 @@ export default function ToolsSandbox() {
     refreshSandboxFiles();
   };
 
+  /* ============================================
+     RENDER
+     ============================================ */
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 60px)', fontFamily: 'system-ui', backgroundColor: '#f8fafc' }}>
       
+      {/* ========================================
+         LEFT PANEL: Tool Registry & Sandbox Files
+         - Built-in tools list
+         - Custom tools list
+         - File browser
+         - Upload dropzone
+         ======================================== */}
       {/* LEFT PANEL - TOOL REGISTRY & SANDBOX FILES */}
       <aside style={{ width: '320px', borderRight: '1px solid #e2e8f0', backgroundColor: '#fff', display: 'flex', flexDirection: 'column' }}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', borderBottom: '1px solid #e2e8f0', overflow: 'hidden' }}>
@@ -904,6 +930,14 @@ export default function ToolsSandbox() {
         </div>
       </aside>
 
+      {/* ========================================
+         CENTER PANEL: Tool Workspace
+         - Tool name/description editor
+         - Code editor (client implementation)
+         - Parameters editor (JSON schema)
+         - Invocation simulator
+         - Execution pipeline display
+         ======================================== */}
       {/* CENTER PANEL - TOOL WORKSPACE */}
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: '1px solid #e2e8f0', backgroundColor: '#fff', overflow: 'hidden' }}>
         {selectedTool || selectedCustomTool ? (
@@ -1093,6 +1127,12 @@ export default function ToolsSandbox() {
         )}
       </main>
 
+      {/* ========================================
+         RIGHT PANEL: Trace Log
+         - Timestamped execution entries
+         - Expandable step details
+         - Result/error display
+         ======================================== */}
       {/* RIGHT PANEL - TRACE LOG */}
       <aside style={{ width: '350px', backgroundColor: '#f8fafc', display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', backgroundColor: '#fff' }}>

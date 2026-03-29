@@ -1,5 +1,18 @@
 'use client';
 
+/**
+ * Chat Agent Page - Main Interface for Agent Interaction
+ * 
+ * Features:
+ * - Context Management: System prefix, message history, per-message overrides
+ * - Transcript Display: Full conversation with reasoning/thinking
+ * - Execution Flow: Visual pipeline showing API stages
+ * - Step Mode: Pause execution between stages
+ * 
+ * This is the primary interaction point for chatting with AI models
+ * with granular control over what gets sent to the model.
+ */
+
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
   RuntimeEngine, 
@@ -13,11 +26,18 @@ import { generateUUID } from '@/lib/state/defaults';
 
 type StageData = Record<string, unknown>;
 
+/**
+ * Main Chat Agent component
+ * Manages conversation state, context building, and execution flow visualization
+ */
 export default function ContextEngine() {
   const { profiles, activeProfile } = useProfiles();
   const { globalSettings, updateGlobalSettings } = useGlobalSettings();
   const { contextEngine, updateContextEngine } = useContextEngine();
 
+  /* ============================================
+     CONTEXT STATE (Persisted to localStorage)
+     ============================================ */
   // Derived state from context
   const { 
     prefix, prefixEnabled, historyEnabled, transcript, overrides,
@@ -50,6 +70,10 @@ export default function ContextEngine() {
     model: activeProfile.model,
   } : null;
 
+  /* ============================================
+     COMPUTED VALUES
+     ============================================ */
+  
   // Convert transcript to Message[] format for the engine
   const transcriptForEngine = useMemo((): Message[] => {
     return transcript.map(entry => ({
@@ -207,6 +231,9 @@ export default function ContextEngine() {
     updateContextEngineRef.current({ transcript: newTranscript });
   }, []);
 
+  /* ============================================
+     ACTION HANDLERS
+     ============================================ */
   // ACTIONS
   const resetOverrides = useCallback(() => {
     updateContextEngine({ overrides: {} });
@@ -360,9 +387,16 @@ export default function ContextEngine() {
     return <div style={{ padding: '3rem', textAlign: 'center', fontFamily: 'system-ui' }}><h2>Set up a profile in Configure & Test first.</h2></div>;
   }
 
+  /* ============================================
+     RENDER
+     ============================================ */
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 60px)', fontFamily: 'system-ui', backgroundColor: '#fdfdfd' }}>
       
+      {/* ========================================
+         LEFT PANEL: NEXT RUN CONTEXT
+         Contains: Prefix editor, message chain, execution flow
+         ======================================== */}
       {/* LEFT: NEXT RUN CONTEXT */}
       <aside style={{ width: '480px', borderRight: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', backgroundColor: '#f8fafc', flexShrink: 0 }}>
         <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid #e2e8f0', backgroundColor: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -560,6 +594,10 @@ export default function ContextEngine() {
         </div>
       </aside>
 
+      {/* ========================================
+         RIGHT PANEL: CANONICAL TRANSCRIPT
+         Contains: Full conversation display, chat input
+         ======================================== */}
       {/* RIGHT: TRANSCRIPT */}
       <section style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#fff' }}>
         <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
