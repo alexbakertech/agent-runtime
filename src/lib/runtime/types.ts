@@ -43,6 +43,8 @@ export interface RequestAssemblyOptions {
 }
 
 // v0.1 Runtime Config (Persistent)
+export type FileAccessMode = 'disabled' | 'readonly' | 'readwrite';
+
 export interface Runtime {
   id: string;
   name: string;
@@ -67,6 +69,8 @@ export interface Runtime {
     showThinking: boolean;
   };
   profileId?: string;
+  runtimeFilesAccess: FileAccessMode;
+  sharedFilesAccess: FileAccessMode;
   createdAt: string;
   updatedAt: string;
 }

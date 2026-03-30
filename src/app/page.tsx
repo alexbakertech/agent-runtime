@@ -1,127 +1,87 @@
 'use client';
 
-/**
- * Home Page - Application Navigation Hub
- * 
- * Features:
- * - Navigation links to all application sections
- * - Quick start guide (3-step onboarding)
- * - About section describing app purpose
- * 
- * This is the entry point for the Agent Runtime application.
- * Provides centralized access to all major features.
- */
-
 import Link from 'next/link';
 
-/**
- * Navigation configuration for all application pages
- * Each entry defines: href, title, description, icon, and color
- */
 const pages = [
   {
-    href: '/chat-agent',
-    title: 'Chat Agent',
-    description: 'Chat with AI agents. Control context, overrides, and execution flow.',
-    icon: '💬',
+    href: '/runtime',
+    title: 'Runtime',
+    description: 'Execute agent runs, inspect model calls, and view execution traces.',
     color: '#3b82f6',
   },
   {
-    href: '/configure',
-    title: 'Configure & Test',
-    description: 'Manage API profiles, test connections, and configure models.',
-    icon: '⚙️',
-    color: '#10b981',
+    href: '/runtime/edit',
+    title: 'Runtime Editor',
+    description: 'Configure runtime definitions, prompts, tools, and debug settings.',
+    color: '#8b5cf6',
   },
   {
-    href: '/sandbox/tools',
-    title: 'Tools Sandbox',
-    description: 'Build, test, and manage custom tools for agent execution.',
-    icon: '🛠️',
+    href: '/tools',
+    title: 'Tools',
+    description: 'Tool registry, definition, invocation, exposure preview, and parsing inspector.',
     color: '#f59e0b',
   },
   {
-    href: '/sandbox/runtime',
-    title: 'Runtime Builder',
-    description: 'Create custom runtimes with Prompt, Tool, and Loop steps.',
-    icon: '🔗',
-    color: '#ec4899',
+    href: '/connections',
+    title: 'Connections',
+    description: 'Manage API profiles and test endpoint connectivity.',
+    color: '#10b981',
   },
   {
-    href: '/export',
+    href: '/state',
     title: 'State',
-    description: 'Export, import, and manage application state.',
-    icon: '📦',
-    color: '#8b5cf6',
+    description: 'Export/import runtime bundles and manage application state.',
+    color: '#ec4899',
   },
 ];
 
 export default function Home() {
-  /* ============================================
-     RENDER
-     ============================================ */
   return (
-    <div style={{ display: 'flex', height: 'calc(100vh - 60px)', fontFamily: 'system-ui', color: '#1a1a1a', backgroundColor: '#fdfdfd' }}>
-      {/* ========================================
-         LEFT SIDEBAR: Quick Start & About
-         ======================================== */}
-      <aside style={{ width: '320px', backgroundColor: '#f8fafc', borderRight: '1px solid #e2e8f0', padding: '1.5rem', overflowY: 'auto' }}>
-        <div style={{ backgroundColor: '#fff', padding: '1.25rem', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '1.5rem' }}>
-          <h2 style={{ fontSize: '0.8rem', fontWeight: 700, color: '#64748b', marginBottom: '0.75rem' }}>QUICK START</h2>
-          <ol style={{ margin: 0, paddingLeft: '1rem', fontSize: '0.8rem', color: '#475569', lineHeight: 1.8 }}>
-            <li>Add an API profile in Configure</li>
-            <li>Build custom tools in Tools Sandbox</li>
-            <li>Start chatting in Chat Agent</li>
-          </ol>
-        </div>
-        <div style={{ backgroundColor: '#fff', padding: '1.25rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-          <h2 style={{ fontSize: '0.8rem', fontWeight: 700, color: '#64748b', marginBottom: '0.75rem' }}>ABOUT</h2>
-          <p style={{ margin: 0, fontSize: '0.75rem', color: '#64748b', lineHeight: 1.6 }}>
-            A transparent, local-first runtime for tool-augmented LLM agents. 
-            Observe, control, and refine your agent's execution flow.
-          </p>
-        </div>
-      </aside>
+    <div style={{ padding: '3rem', maxWidth: '900px', margin: '0 auto', fontFamily: 'system-ui' }}>
+      <h1 style={{ fontSize: '2rem', fontWeight: 700, marginBottom: '0.5rem' }}>Agent Runtime</h1>
+      <p style={{ fontSize: '1.1rem', color: '#64748b', marginBottom: '2rem' }}>
+        A transparent runtime for tool-augmented agents. Define runtimes, configure prompts, execute agent loops, and inspect every model call.
+      </p>
 
-      {/* ========================================
-         MAIN CONTENT: Page Navigation Cards
-         ======================================== */}
-      <main style={{ flex: 1, padding: '2rem', overflowY: 'auto' }}>
-        <h1 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '0.5rem' }}>Welcome to Agent Runtime</h1>
-        <p style={{ color: '#64748b', marginBottom: '2rem', fontSize: '0.9rem' }}>Select a section to get started</p>
-        
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1rem' }}>
-          {pages.map((page) => (
-            <Link 
-              key={page.href} 
-              href={page.href}
-              style={{ 
-                display: 'block',
-                padding: '1.5rem', 
-                backgroundColor: '#fff',
-                borderRadius: '8px', 
-                border: '1px solid #e2e8f0',
-                textDecoration: 'none',
-                transition: 'all 0.2s ease',
-              }}
-              onMouseOver={(e) => {
-                e.currentTarget.style.borderColor = page.color;
-                e.currentTarget.style.boxShadow = `0 4px 12px -2px ${page.color}30`;
-              }}
-              onMouseOut={(e) => {
-                e.currentTarget.style.borderColor = '#e2e8f0';
-                e.currentTarget.style.boxShadow = 'none';
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
-                <span style={{ fontSize: '1.5rem' }}>{page.icon}</span>
-                <span style={{ fontSize: '1rem', fontWeight: 700, color: page.color }}>{page.title}</span>
-              </div>
-              <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748b', lineHeight: 1.5 }}>{page.description}</p>
-            </Link>
-          ))}
-        </div>
-      </main>
+      <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
+        {pages.map((page) => (
+          <Link 
+            key={page.href} 
+            href={page.href}
+            style={{ 
+              display: 'block',
+              padding: '1.5rem', 
+              backgroundColor: '#fff',
+              borderRadius: '8px', 
+              border: '1px solid #e2e8f0',
+              textDecoration: 'none',
+              transition: 'all 0.2s ease',
+            }}
+            onMouseOver={(e) => {
+              e.currentTarget.style.borderColor = page.color;
+              e.currentTarget.style.boxShadow = `0 4px 12px -2px ${page.color}30`;
+            }}
+            onMouseOut={(e) => {
+              e.currentTarget.style.borderColor = '#e2e8f0';
+              e.currentTarget.style.boxShadow = 'none';
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
+              <span style={{ fontSize: '1rem', fontWeight: 700, color: page.color }}>{page.title}</span>
+            </div>
+            <p style={{ margin: 0, fontSize: '0.85rem', color: '#64748b', lineHeight: 1.5 }}>{page.description}</p>
+          </Link>
+        ))}
+      </div>
+
+      <div style={{ marginTop: '3rem', padding: '1.5rem', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+        <h2 style={{ fontSize: '1rem', fontWeight: 600, margin: '0 0 0.5rem' }}>Quick Start</h2>
+        <ol style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.85rem', color: '#64748b', lineHeight: 1.8 }}>
+          <li>Set up an API profile in <strong>Connections</strong></li>
+          <li>Create or edit a runtime in <strong>Runtime Editor</strong></li>
+          <li>Go to <strong>Runtime</strong> to execute agent runs and inspect model calls</li>
+        </ol>
+      </div>
     </div>
   );
 }

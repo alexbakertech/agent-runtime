@@ -969,6 +969,7 @@ export default function RuntimeBuilder() {
       trace: [],
       sandboxSnapshot: {},
       status: 'running',
+      contextSnapshots: {},
     };
     
     updateRuntime({ runState: newRunState });
@@ -1173,6 +1174,7 @@ User: ${userInput}`;
         sandboxSnapshot: {},
         status: 'completed',
         finalOutput: result.content,
+        contextSnapshots: {},
       };
       
       updateRuntime({ runState: finalRunState });

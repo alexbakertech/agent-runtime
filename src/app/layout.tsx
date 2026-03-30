@@ -8,7 +8,7 @@ import { StateProvider } from '@/lib/state';
  */
 export const metadata: Metadata = {
   title: "Agent Runtime",
-  description: "Local-first agent runtime",
+  description: "Transparent runtime for tool-augmented agents",
 };
 
 /**
@@ -55,22 +55,19 @@ export default function RootLayout({
           <Link href="/" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
             Home
           </Link>
-          <Link href="/chat-agent" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
-            Chat Agent
+          <Link href="/runtime" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
+            Runtime
           </Link>
-          <Link href="/sandbox/tools" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
-            Tools Sandbox
+          <Link href="/runtime/edit" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
+            Runtime Editor
           </Link>
-          <Link href="/sandbox/runtime" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
-            Runtime Builder
+          <Link href="/tools" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
+            Tools
           </Link>
-          <Link href="/sandbox/prompts" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
-            Prompts
+          <Link href="/connections" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
+            Connections
           </Link>
-          <Link href="/configure" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
-            Configure & Test
-          </Link>
-          <Link href="/export" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
+          <Link href="/state" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 }}>
             State
           </Link>
         </nav>
