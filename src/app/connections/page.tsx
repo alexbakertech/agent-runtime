@@ -43,6 +43,8 @@ export default function ConnectionsPage() {
       apiKey: '',
       model: '',
     });
+    setAvailableModels([]);
+    setFetchStatus('');
     setEditingId('new');
   };
 
@@ -123,7 +125,7 @@ export default function ConnectionsPage() {
     setTesting(false);
   };
 
-  const handleFetchModels = async (profile: typeof profiles[0]) => {
+  const handleFetchModels = async (profile: { baseUrl: string; apiKey: string; model: string }) => {
     setFetchingModels(true);
     setAvailableModels([]);
     setFetchStatus('Fetching models...');
@@ -134,11 +136,15 @@ export default function ConnectionsPage() {
       model: profile.model,
     };
 
-    const result = await fetchModels(config, browserConsent, retryEnabled);
+    const result = await fetchModels(config);
 
     if (result.success && result.models) {
-      setAvailableModels(result.models);
-      setFetchStatus(`Found ${result.models.length} models`);
+      const models = result.models;
+      setAvailableModels(models);
+      setFetchStatus(`Found ${models.length} models`);
+      if (models.length === 1 && !formData.model) {
+        setFormData(prev => ({ ...prev, model: models[0] }));
+      }
     } else {
       if (result.error === 'BROWSER_CONSENT_REQUIRED') {
         setFetchStatus('Browser consent required. Enable in Settings.');
@@ -242,8 +248,6 @@ export default function ConnectionsPage() {
                   )}
                   <button 
                     onClick={() => handleFetchModels({
-                      id: 'temp',
-                      name: formData.name,
                       baseUrl: formData.baseUrl,
                       apiKey: formData.apiKey,
                       model: formData.model,
@@ -287,7 +291,11 @@ export default function ConnectionsPage() {
                   Save
                 </button>
                 <button 
-                  onClick={() => setEditingId(null)}
+                  onClick={() => {
+                    setAvailableModels([]);
+                    setFetchStatus('');
+                    setEditingId(null);
+                  }}
                   style={{
                     padding: '0.4rem 0.75rem',
                     backgroundColor: '#fff',
@@ -363,6 +371,8 @@ export default function ConnectionsPage() {
                         apiKey: profile.apiKey,
                         model: profile.model,
                       });
+                      setAvailableModels([]);
+                      setFetchStatus('');
                       setEditingId(profile.id);
                     }}
                     style={{
