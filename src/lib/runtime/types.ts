@@ -76,7 +76,7 @@ export interface Runtime {
 }
 
 // v0.1 Run State (Ephemeral)
-export type RunPhase = 'ingest' | 'plan' | 'act' | 'evaluate' | 'respond';
+export type RunPhase = 'model_call' | 'ingest' | 'plan' | 'act' | 'evaluate' | 'respond';
 export type RunStatus = 'running' | 'waiting' | 'completed' | 'failed';
 
 export interface ToolCall {

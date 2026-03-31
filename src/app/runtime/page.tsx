@@ -190,6 +190,7 @@ function ExecutionTrace({
 
   const getPhaseColor = (phase: RunPhase): string => {
     switch (phase) {
+      case 'model_call': return '#6366f1';
       case 'ingest': return '#3b82f6';
       case 'plan': return '#8b5cf6';
       case 'act': return '#10b981';
@@ -254,18 +255,24 @@ function ExecutionTrace({
         </div>
       )}
 
-      {trace.map((item, index) => (
+      {trace.map((item, index) => {
+        const isModelCall = item.phase === 'model_call';
+        
+        return (
         <div
           key={item.id}
           style={{
             marginBottom: '0.75rem',
             padding: '0.75rem',
-            backgroundColor: '#fff',
+            backgroundColor: isModelCall ? '#eef2ff' : '#fff',
             borderRadius: '6px',
-            border: '1px solid #e2e8f0',
+            border: isModelCall ? '2px solid #6366f1' : '1px solid #e2e8f0',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+            {isModelCall && (
+              <span style={{ fontSize: '0.7rem', color: '#6366f1' }}>&#8594;</span>
+            )}
             <span
               style={{
                 fontSize: '0.65rem',
@@ -274,21 +281,21 @@ function ExecutionTrace({
                 color: getPhaseColor(item.phase),
               }}
             >
-              {item.phase}
+              {isModelCall ? 'model call' : item.phase}
             </span>
             <span style={{ fontSize: '0.7rem', color: '#64748b' }}>
-              Step {index + 1}
+              {isModelCall ? `Send ${index + 1}` : `Step ${index + 1}`}
             </span>
-            {item.modelInput && (
+            {isModelCall && item.modelInput && (
               <button
                 onClick={() => toggleContext(item.id)}
                 style={{
                   marginLeft: 'auto',
                   fontSize: '0.65rem',
                   fontWeight: 600,
-                  color: '#64748b',
-                  backgroundColor: '#f1f5f9',
-                  border: '1px solid #e2e8f0',
+                  color: '#4f46e5',
+                  backgroundColor: '#e0e7ff',
+                  border: '1px solid #c7d2fe',
                   borderRadius: '4px',
                   padding: '0.15rem 0.5rem',
                   cursor: 'pointer',
@@ -303,7 +310,7 @@ function ExecutionTrace({
             {item.contextSummary}
           </div>
           
-          {expandedContexts.has(item.id) && item.modelInput && (
+          {isModelCall && expandedContexts.has(item.id) && item.modelInput && (
             <div style={{ 
               marginBottom: '0.5rem',
               padding: '0.75rem',
@@ -352,7 +359,8 @@ function ExecutionTrace({
             {item.transitionReason}
           </div>
         </div>
-      ))}
+        );
+      })}
 
       {isRunning && currentPhase && (
         <div style={{ padding: '1rem', backgroundColor: '#fef3c7', borderRadius: '6px', margin: '0 1rem', fontSize: '0.8rem', color: '#92400e' }}>
@@ -568,7 +576,7 @@ export default function RuntimePage() {
     const agent = new AgentRuntime((stage, data) => {
       const phaseMap: Record<string, RunPhase> = {
         preparing: 'ingest',
-        calling: 'plan',
+        calling: 'model_call',
         receiving: 'plan',
         act: 'act',
         evaluate: 'evaluate',
@@ -582,48 +590,45 @@ export default function RuntimePage() {
         const messages = data?.messages as Array<{ role: string; content?: string }> | undefined;
         const promptType = data?.promptType as string | undefined;
         
-        // First API call - no toolCalls yet, this is the initial plan context
+        // Model Call block - context being sent to the model
         if (!toolCalls && messages && messages.length > 0) {
           setLiveTrace(prev => {
+            const modelCallItem: TraceItem = {
+              id: generateId(),
+              stepId: generateId(),
+              phase: 'model_call',
+              previousPhase: 'ingest',
+              nextPhase: 'plan',
+              contextSummary: promptType === 'plan' 
+                ? 'Sending user input to model' 
+                : 'Sending tool results to model for evaluation',
+              modelInput: JSON.stringify(messages, null, 2),
+              transitionReason: promptType === 'plan'
+                ? 'Model call with initial context'
+                : 'Model call with tool execution results',
+              timestamp: new Date().toISOString(),
+            };
+            return [...prev, modelCallItem];
+          });
+        }
+        
+        // Model response with tool_calls - create a plan item showing what model decided
+        if (toolCalls && toolCalls.length > 0) {
+          const modelResponse = data?.modelResponse as { content: string; toolCalls: Array<{ name: string; arguments: string }> } | undefined;
+          setLiveTrace(prev => {
+            // Check if we already have a plan item for this step
+            if (prev.some(t => t.phase === 'plan')) return prev;
             const planItem: TraceItem = {
               id: generateId(),
               stepId: generateId(),
               phase: 'plan',
-              previousPhase: 'ingest',
+              previousPhase: 'model_call',
               nextPhase: 'act',
-              contextSummary: promptType === 'plan' 
-                ? 'Sending initial context to model' 
-                : 'Sending updated context to model',
-              modelInput: JSON.stringify(messages, null, 2),
-              transitionReason: promptType === 'plan'
-                ? 'Model receiving user input and determining action'
-                : 'Model receiving tool results and evaluating next action',
+              contextSummary: `Model decided to use ${toolCalls.length} tool call(s)`,
+              transitionReason: 'Model response: tool calls requested',
               timestamp: new Date().toISOString(),
             };
             return [...prev, planItem];
-          });
-        }
-        
-        // Callback after tool calls - this is the response that contains tool_calls
-        if (toolCalls && toolCalls.length > 0) {
-          const modelResponse = data?.modelResponse as { content: string; toolCalls: Array<{ name: string; arguments: string }> } | undefined;
-          setLiveTrace(prev => {
-            const existingPlan = prev.find(t => t.phase === 'plan');
-            if (existingPlan) {
-              // Update the existing plan item with the model response
-              return prev.map(t => t.phase === 'plan' && !t.responseStream
-                ? { 
-                    ...t, 
-                    contextSummary: `Model returned ${toolCalls.length} tool call(s)`,
-                    modelResponse: modelResponse || {
-                      content: '',
-                      toolCalls: toolCalls.map(tc => ({ name: tc.name, arguments: tc.arguments }))
-                    }
-                  }
-                : t
-              );
-            }
-            return prev;
           });
         }
       }
@@ -655,17 +660,15 @@ export default function RuntimePage() {
       if (stage === 'evaluate' && data) {
         setLiveTrace(prev => {
           if (prev.some(t => t.phase === 'evaluate' && t.toolCall?.name === data.toolCall)) return prev;
-          const messages = data?.messages as Array<{ role: string; content?: string }> | undefined;
           const evalItem: TraceItem = {
             id: generateId(),
             stepId: generateId(),
             phase: 'evaluate',
             previousPhase: 'act',
-            nextPhase: 'plan',
+            nextPhase: 'model_call',
             contextSummary: `Evaluated result from ${data.toolCall}`,
-            modelInput: messages ? JSON.stringify(messages, null, 2) : undefined,
             evaluationResult: data.result,
-            transitionReason: 'Tool result received, continuing to next iteration',
+            transitionReason: 'Tool result evaluated, ready for next model call',
             timestamp: new Date().toISOString(),
           };
           return [...prev, evalItem];
