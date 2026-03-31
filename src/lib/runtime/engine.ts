@@ -1,7 +1,7 @@
 import { LoopStage, TraceEvent, RuntimeConfig, Message, Override, RequestAssemblyOptions } from './types';
 import { assembleRequest } from './assembly';
 import { OpenAI } from 'openai';
-import { isBrowserConsentGiven } from '@/lib/api/client';
+import { isBrowserConsentGiven, isRetryEnabled, withRetry } from '@/lib/api/client';
 
 export type RuntimeEventHandler = (stage: LoopStage, data?: any) => void;
 
@@ -102,17 +102,27 @@ export class RuntimeEngine {
         throw new Error('Browser API consent required. Please enable "Allow browser API calls" in settings.');
       }
 
-      const openai = new OpenAI({
-        baseURL: config.baseUrl,
-        apiKey: config.apiKey,
-        dangerouslyAllowBrowser: true,
-      });
+      const createStream = async () => {
+        const openai = new OpenAI({
+          baseURL: config.baseUrl,
+          apiKey: config.apiKey,
+          dangerouslyAllowBrowser: true,
+        });
+        return openai.chat.completions.create({
+          model: config.model,
+          messages: [{ role: 'user', content: fullPromptText }],
+          stream: true,
+        });
+      };
 
-      const stream = await openai.chat.completions.create({
-        model: config.model,
-        messages: [{ role: 'user', content: fullPromptText }],
-        stream: true,
-      });
+      let retryCount = 0;
+      const onRetry = (attempt: number) => {
+        retryCount = attempt;
+      };
+
+      const stream = isRetryEnabled()
+        ? (await withRetry(createStream, 3, 1000, onRetry)).data
+        : await createStream();
 
       await this.transition('receiving');
 
@@ -141,12 +151,14 @@ export class RuntimeEngine {
 
       await this.transition('finished', {
         content: accumulatedContent,
-        reasoning: accumulatedReasoning
+        reasoning: accumulatedReasoning,
+        retryInfo: retryCount > 0 ? { retries: retryCount } : undefined
       });
 
       return {
         content: accumulatedContent,
-        reasoning: accumulatedReasoning
+        reasoning: accumulatedReasoning,
+        retryInfo: retryCount > 0 ? { retries: retryCount } : undefined
       };
 
     } catch (err: any) {

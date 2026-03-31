@@ -1,47 +1,56 @@
 'use client';
 
-import { useState, useEffect, useRef, useMemo } from 'react';
+/**
+ * Chat Agent Page - Main Interface for Agent Interaction
+ * 
+ * Features:
+ * - Context Management: System prefix, message history, per-message overrides
+ * - Transcript Display: Full conversation with reasoning/thinking
+ * - Execution Flow: Visual pipeline showing API stages
+ * - Step Mode: Pause execution between stages
+ * 
+ * This is the primary interaction point for chatting with AI models
+ * with granular control over what gets sent to the model.
+ */
+
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
   RuntimeEngine, 
   Message, 
-  Override, 
   LoopStage, 
   RuntimeConfig, 
   assembleRequest 
 } from '@/lib/runtime';
+import { useProfiles, useGlobalSettings, useContextEngine, Override, TranscriptEntry } from '@/lib/state';
+import { generateUUID } from '@/lib/state/defaults';
 
-const PROFILES_KEY = 'agent_runtime_profiles';
-const PREFIX_KEY = 'agent_runtime_prefix';
+type StageData = Record<string, unknown>;
 
+/**
+ * Main Chat Agent component
+ * Manages conversation state, context building, and execution flow visualization
+ */
 export default function ContextEngine() {
-  const [activeProfile, setActiveProfile] = useState<RuntimeConfig | null>(null);
-  const [prefix, setPrefix] = useState('You are a helpful AI assistant. Answer concisely.');
-  const [prefixEnabled, setPrefixEnabled] = useState(true);
-  const [historyEnabled, setHistoryEnabled] = useState(true);
-  
-  // DATA STATES
-  const [transcript, setTranscript] = useState<Message[]>([]);
-  const [overrides, setOverrides] = useState<Record<number, Override>>({});
-  
-  // UI STATES
-  const [loopStage, setLoopStage] = useState<LoopStage>('idle');
-  const [stageData, setStageData] = useState<any>({});
-  const [stepMode, setStepMode] = useState(false);
-  const [isWaitingForNext, setIsWaitingForNext] = useState(false);
-  const [showFullPrompt, setShowFullPrompt] = useState(false);
-  const [expandedStages, setExpandedStages] = useState<Record<string, boolean>>({});
-  const [viewingSnapshotIndex, setViewingSnapshotIndex] = useState<number | null>(null);
-  const [showContextPreview, setShowContextPreview] = useState(false);
-  const [copied, setCopied] = useState(false);
-  
-  // Section Collapse states
-  const [prefixCollapsed, setPrefixCollapsed] = useState(false);
-  const [historyCollapsed, setHistoryCollapsed] = useState(false);
+  const { profiles, activeProfile } = useProfiles();
+  const { globalSettings, updateGlobalSettings } = useGlobalSettings();
+  const { contextEngine, updateContextEngine } = useContextEngine();
 
-  // Thinking/Reasoning states
-  const [includeThinkingInContext, setIncludeThinkingInContext] = useState(false);
-  const [expandedContextThinking, setExpandedContextThinking] = useState<Record<number, boolean>>({});
-  const [expandedThinking, setExpandedThinking] = useState<Record<number, boolean>>({});
+  /* ============================================
+     CONTEXT STATE (Persisted to localStorage)
+     ============================================ */
+  // Derived state from context
+  const { 
+    prefix, prefixEnabled, historyEnabled, transcript, overrides,
+    showContextPreview, expandedStages, viewingSnapshotIndex,
+    prefixCollapsed, historyCollapsed, expandedThinking, showFullPrompt,
+    expandedContextThinking = {}
+  } = contextEngine;
+
+  // Local-only execution state (not persisted)
+  const [loopStage, setLoopStage] = useState<LoopStage>('idle');
+  const [stageData, setStageData] = useState<StageData>({});
+  const [isWaitingForNext, setIsWaitingForNext] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   // Chat input
   const [input, setInput] = useState('');
@@ -50,13 +59,49 @@ export default function ContextEngine() {
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const engineRef = useRef<RuntimeEngine | null>(null);
+  const transcriptRef = useRef<TranscriptEntry[]>(transcript);
+  transcriptRef.current = transcript;
+
+  // Get active profile config for API calls
+  const activeProfileConfig: RuntimeConfig | null = activeProfile ? {
+    baseUrl: activeProfile.baseUrl,
+    apiKey: activeProfile.apiKey,
+    model: activeProfile.model,
+  } : null;
+
+  /* ============================================
+     COMPUTED VALUES
+     ============================================ */
+  
+  // Convert transcript to Message[] format for the engine
+  const transcriptForEngine = useMemo((): Message[] => {
+    return transcript.map(entry => ({
+      role: entry.role,
+      content: entry.content,
+      reasoningContent: entry.reasoningContent,
+      contextSnapshot: entry.contextSnapshot,
+    }));
+  }, [transcript]);
+
+  // Convert overrides to index-based for the engine
+  const overridesForEngine = useMemo((): Record<number, Override> => {
+    const result: Record<number, Override> = {};
+    transcript.forEach((entry, idx) => {
+      const override = overrides[entry.id];
+      if (override) {
+        result[idx] = override;
+      }
+    });
+    return result;
+  }, [transcript, overrides]);
 
   // COMPUTED: Effective Context
   const effectiveContext = useMemo(() => {
     if (!historyEnabled) return [];
     let result: Message[] = [];
     transcript.forEach((msg, idx) => {
-      const ovr = overrides[idx];
+      const ovr = overrides[msg.id];
       if (!ovr?.excluded) {
         result.push({
           role: msg.role,
@@ -76,8 +121,8 @@ export default function ContextEngine() {
     }
     
     if (historyEnabled) {
-      transcript.forEach((msg, idx) => {
-        const ovr = overrides[idx];
+      transcript.forEach((msg) => {
+        const ovr = overrides[msg.id];
         if (ovr?.excluded) return;
         
         let content = ovr?.content !== undefined ? ovr.content : msg.content;
@@ -89,7 +134,7 @@ export default function ContextEngine() {
           reasoningContent = ovr.reasoningContent;
         }
         
-        if (includeThinkingInContext && reasoningContent && msg.role === 'assistant') {
+        if (globalSettings.includeThinkingInContext && reasoningContent && msg.role === 'assistant') {
           content = `<thinking>\n${reasoningContent}\n</thinking>\n\n${content}`;
         }
         
@@ -101,18 +146,18 @@ export default function ContextEngine() {
     preview += `USER: ${currentInput}`;
     
     return preview;
-  }, [prefix, prefixEnabled, transcript, overrides, historyEnabled, includeThinkingInContext, input]);
+  }, [prefix, prefixEnabled, transcript, overrides, historyEnabled, globalSettings.includeThinkingInContext, input]);
 
-  const handleCopyContext = () => {
+  const handleCopyContext = useCallback(() => {
     navigator.clipboard.writeText(fullContextPreview);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  };
+  }, [fullContextPreview]);
 
   const overrideCount = useMemo(() => {
     let count = 0;
-    transcript.forEach((msg, idx) => {
-      const ovr = overrides[idx];
+    transcript.forEach((msg) => {
+      const ovr = overrides[msg.id];
       if (!ovr) return;
       
       if (ovr.excluded) {
@@ -134,56 +179,38 @@ export default function ContextEngine() {
     });
     return count;
   }, [transcript, overrides]);
+
   const isDiffering = useMemo(() => overrideCount > 0, [overrideCount]);
 
-  const engineRef = useRef<RuntimeEngine | null>(null);
-
-  // Persistence
+  // Initialize Engine
   useEffect(() => {
-    const savedProfiles = localStorage.getItem(PROFILES_KEY);
-    const savedPrefix = localStorage.getItem(PREFIX_KEY);
-    if (savedProfiles) {
-      try {
-        const parsed = JSON.parse(savedProfiles);
-        if (parsed.length > 0) setActiveProfile(parsed[0]);
-      } catch (e) { console.error(e); }
-    }
-    if (savedPrefix) setPrefix(savedPrefix);
-
-    // Initialize Engine
     engineRef.current = new RuntimeEngine((stage, data) => {
       setLoopStage(stage);
       if (stage === 'receiving' && typeof data === 'object') {
         const { content, reasoning, hasThinking } = data;
         setTranscript(prev => {
-          const next = [...prev];
-          if (next.length > 0) {
-            next[next.length - 1] = {
-              ...next[next.length - 1],
-              content: content,
-              reasoningContent: reasoning || next[next.length - 1].reasoningContent
-            };
-          }
-          return next;
+          if (prev.length === 0) return prev;
+          const lastId = prev[prev.length - 1].id;
+          return prev.map(entry => 
+            entry.id === lastId
+              ? { ...entry, content, reasoningContent: reasoning || entry.reasoningContent }
+              : entry
+          );
         });
-        setStageData((prev: any) => ({ ...prev, 
-          receiving: content,
-          hasThinking
-        }));
+        setStageData((prev: StageData) => ({ ...prev, receiving: content, hasThinking }));
       } else if (data) {
-        setStageData((prev: any) => ({ ...prev, [stage]: data }));
+        setStageData((prev: StageData) => ({ ...prev, [stage]: data }));
       }
       setIsWaitingForNext(engineRef.current?.isWaitingForStep() || false);
     });
   }, []);
 
-  useEffect(() => { localStorage.setItem(PREFIX_KEY, prefix); }, [prefix]);
-
+  // Sync global settings changes to engine
   useEffect(() => {
     if (engineRef.current) {
-      engineRef.current.setStepMode(stepMode);
+      engineRef.current.setStepMode(globalSettings.stepMode);
     }
-  }, [stepMode]);
+  }, [globalSettings.stepMode]);
 
   // Auto-resize / scroll
   useEffect(() => {
@@ -195,31 +222,65 @@ export default function ContextEngine() {
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [transcript]);
 
+  // Helper to update transcript immutably - uses ref to avoid stale closure
+  const updateContextEngineRef = useRef(updateContextEngine);
+  updateContextEngineRef.current = updateContextEngine;
+  
+  const setTranscript = useCallback((updater: (prev: TranscriptEntry[]) => TranscriptEntry[]) => {
+    const newTranscript = updater(transcriptRef.current);
+    updateContextEngineRef.current({ transcript: newTranscript });
+  }, []);
+
+  /* ============================================
+     ACTION HANDLERS
+     ============================================ */
   // ACTIONS
-  const resetOverrides = () => setOverrides({});
-  const resetTurn = (idx: number) => setOverrides(prev => {
-    const next = { ...prev };
-    delete next[idx];
-    return next;
-  });
-  const toggleStageExpansion = (stage: string) => setExpandedStages(prev => ({ ...prev, [stage]: !prev[stage] }));
-  const handleHistoryEnabledChange = (enabled: boolean) => {
-    setHistoryEnabled(enabled);
+  const resetOverrides = useCallback(() => {
+    updateContextEngine({ overrides: {} });
+  }, [updateContextEngine]);
+
+  const resetTurn = useCallback((id: string) => {
+    updateContextEngine({
+      overrides: Object.fromEntries(
+        Object.entries(overrides).filter(([key]) => key !== id)
+      )
+    });
+  }, [overrides, updateContextEngine]);
+
+  const clearContext = useCallback(() => {
+    updateContextEngine({
+      transcript: [],
+      overrides: {},
+      expandedThinking: {},
+      expandedContextThinking: {},
+      viewingSnapshotIndex: null,
+    });
+  }, [updateContextEngine]);
+
+  const toggleStageExpansion = useCallback((stage: string) => {
+    updateContextEngine({ expandedStages: { ...expandedStages, [stage]: !expandedStages[stage] } });
+  }, [expandedStages, updateContextEngine]);
+
+  const handleHistoryEnabledChange = useCallback((enabled: boolean) => {
+    updateContextEngine({ 
+      historyEnabled: enabled,
+      ...(enabled ? {} : { expandedContextThinking: {}, historyCollapsed: true })
+    });
     if (!enabled) {
-      setIncludeThinkingInContext(false);
-      setHistoryCollapsed(true);
+      updateGlobalSettings({ includeThinkingInContext: false });
     }
-  };
-  const handlePrefixEnabledChange = (enabled: boolean) => {
-    setPrefixEnabled(enabled);
-    if (!enabled) {
-      setPrefixCollapsed(true);
-    }
-  };
+  }, [updateContextEngine, updateGlobalSettings]);
+
+  const handlePrefixEnabledChange = useCallback((enabled: boolean) => {
+    updateContextEngine({ 
+      prefixEnabled: enabled,
+      ...(enabled ? {} : { prefixCollapsed: true })
+    });
+  }, [updateContextEngine]);
 
   const handleChat = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || chatStatus === 'loading' || !activeProfile || !engineRef.current) return;
+    if (!input.trim() || chatStatus === 'loading' || !activeProfileConfig || !engineRef.current) return;
 
     const currentInput = input;
     setInput('');
@@ -227,28 +288,35 @@ export default function ContextEngine() {
     setStageData({});
 
     try {
-      // Assemble request for snapshot
-      const { fullPromptText } = assembleRequest(transcript, currentInput, overrides, {
+      const { fullPromptText } = assembleRequest(transcriptForEngine, currentInput, overridesForEngine, {
         prefix,
         prefixEnabled,
         historyEnabled,
-        includeThinkingInContext
+        includeThinkingInContext: globalSettings.includeThinkingInContext
       });
 
-      // Prepare transcript for streaming
+      const userId = generateUUID();
+      const assistantId = generateUUID();
+
       setTranscript(prev => [
         ...prev,
-        { role: 'user', content: currentInput, contextSnapshot: fullPromptText },
-        { role: 'assistant', content: '' }
+        { id: userId, role: 'user', content: currentInput, contextSnapshot: fullPromptText, timestamp: new Date().toISOString() },
+        { id: assistantId, role: 'assistant', content: '', timestamp: new Date().toISOString() }
       ]);
 
-      await engineRef.current.run(
-        activeProfile,
+      const result = await engineRef.current.run(
+        activeProfileConfig,
         currentInput,
-        transcript,
-        overrides,
-        { prefix, prefixEnabled, historyEnabled, includeThinkingInContext }
+        transcriptForEngine,
+        overridesForEngine,
+        { prefix, prefixEnabled, historyEnabled, includeThinkingInContext: globalSettings.includeThinkingInContext }
       );
+
+      if (result.retryInfo) {
+        setTranscript(prev => prev.map(entry => 
+          entry.id === assistantId ? { ...entry, retryInfo: result.retryInfo } : entry
+        ));
+      }
 
       setChatStatus('idle');
     } catch (err: any) {
@@ -258,7 +326,19 @@ export default function ContextEngine() {
     }
   };
 
-  const StepUI = ({ id, label, data }: any) => {
+  // Update single transcript entry
+  const updateTranscriptEntry = useCallback((id: string, updates: Partial<TranscriptEntry>) => {
+    setTranscript(prev => prev.map(entry => entry.id === id ? { ...entry, ...updates } : entry));
+  }, [setTranscript]);
+
+  // Update single override
+  const updateOverride = useCallback((id: string, updates: Partial<Override>) => {
+    updateContextEngine({
+      overrides: { ...overrides, [id]: { ...overrides[id], ...updates, id } as Override }
+    });
+  }, [overrides, updateContextEngine]);
+
+  const StepUI = ({ id, label, data }: { id: string; label: string; data: unknown }) => {
     const isActive = loopStage === id;
     const isExpanded = expandedStages[id];
     const hasData = !!data;
@@ -283,7 +363,7 @@ export default function ContextEngine() {
         {isExpanded && hasData && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginBottom: '0.5rem' }}>
             {id === 'calling' && (
-              <button onClick={() => setShowFullPrompt(!showFullPrompt)} style={{ alignSelf: 'flex-start', fontSize: '0.6rem', padding: '0.1rem 0.3rem', backgroundColor: '#334155', color: '#e2e8f0', border: 'none', borderRadius: '3px', cursor: 'pointer' }}>
+              <button onClick={() => updateContextEngine({ showFullPrompt: !showFullPrompt })} style={{ alignSelf: 'flex-start', fontSize: '0.6rem', padding: '0.1rem 0.3rem', backgroundColor: '#334155', color: '#e2e8f0', border: 'none', borderRadius: '3px', cursor: 'pointer' }}>
                 {showFullPrompt ? 'HIDE PROMPT' : 'SHOW PROMPT'}
               </button>
             )}
@@ -292,7 +372,7 @@ export default function ContextEngine() {
               fontSize: '0.7rem', borderRadius: '6px', maxHeight: '150px', overflowY: 'auto', whiteSpace: 'pre-wrap'
             }}>
               {id === 'calling' ? (
-                JSON.stringify({ ...data, body: { ...data.body, message: showFullPrompt ? data.body.message : '[PROMPT_CONTEXT]' } }, null, 2)
+                JSON.stringify({ ...data as object, body: { ...(data as { body?: object })?.body, message: showFullPrompt ? (data as { body?: { message?: string } })?.body?.message : '[PROMPT_CONTEXT]' } }, null, 2)
               ) : (
                 typeof data === 'string' ? data : JSON.stringify(data, null, 2)
               )}
@@ -303,17 +383,26 @@ export default function ContextEngine() {
     );
   };
 
-  if (!activeProfile) return <div style={{ padding: '3rem', textAlign: 'center', fontFamily: 'system-ui' }}><h2>Set up a profile in Configure & Test first.</h2></div>;
+  if (!activeProfile) {
+    return <div style={{ padding: '3rem', textAlign: 'center', fontFamily: 'system-ui' }}><h2>Set up a profile in Configure & Test first.</h2></div>;
+  }
 
+  /* ============================================
+     RENDER
+     ============================================ */
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 60px)', fontFamily: 'system-ui', backgroundColor: '#fdfdfd' }}>
       
+      {/* ========================================
+         LEFT PANEL: NEXT RUN CONTEXT
+         Contains: Prefix editor, message chain, execution flow
+         ======================================== */}
       {/* LEFT: NEXT RUN CONTEXT */}
       <aside style={{ width: '480px', borderRight: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', backgroundColor: '#f8fafc', flexShrink: 0 }}>
         <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid #e2e8f0', backgroundColor: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800 }}>NEXT RUN CONTEXT</h2>
           <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <button onClick={() => setShowContextPreview(!showContextPreview)} style={{ fontSize: '0.7rem', cursor: 'pointer', background: 'none', border: '1px solid #e2e8f0', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
+            <button onClick={() => updateContextEngine({ showContextPreview: !showContextPreview })} style={{ fontSize: '0.7rem', cursor: 'pointer', background: 'none', border: '1px solid #e2e8f0', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
               {showContextPreview ? 'Close Preview' : 'View Context'}
             </button>
             {showContextPreview && (
@@ -322,9 +411,16 @@ export default function ContextEngine() {
               </button>
             )}
             {!showContextPreview && (
-              <button onClick={resetOverrides} style={{ fontSize: '0.7rem', cursor: 'pointer', color: '#ef4444', background: 'none', border: '1px solid #fee2e2', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
-                Reset
-              </button>
+              <>
+                <button onClick={resetOverrides} style={{ fontSize: '0.7rem', cursor: 'pointer', color: '#ef4444', background: 'none', border: '1px solid #fee2e2', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
+                  Reset
+                </button>
+                {transcript.length > 0 && (
+                  <button onClick={clearContext} style={{ fontSize: '0.7rem', cursor: 'pointer', color: '#dc2626', background: 'none', border: '1px solid #fecaca', padding: '0.2rem 0.5rem', borderRadius: '4px', fontWeight: 600 }}>
+                    Clear Context
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -351,14 +447,14 @@ export default function ContextEngine() {
                     <input type="checkbox" checked={prefixEnabled} onChange={e => handlePrefixEnabledChange(e.target.checked)} />
                     <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b' }}>PREFIX (SYSTEM PROMPT)</span>
                   </div>
-                  <button onClick={() => setPrefixCollapsed(!prefixCollapsed)} disabled={!prefixEnabled} style={{ background: 'none', border: 'none', cursor: prefixEnabled ? 'pointer' : 'not-allowed', fontSize: '0.7rem', color: prefixEnabled ? '#94a3b8' : '#cbd5e1' }}>
+                  <button onClick={() => updateContextEngine({ prefixCollapsed: !prefixCollapsed })} disabled={!prefixEnabled} style={{ background: 'none', border: 'none', cursor: prefixEnabled ? 'pointer' : 'not-allowed', fontSize: '0.7rem', color: prefixEnabled ? '#94a3b8' : '#cbd5e1' }}>
                     {prefixCollapsed ? 'EXPAND' : 'COLLAPSE'}
                   </button>
                 </div>
                 {!prefixCollapsed && (
                   <textarea 
                     value={prefix} 
-                    onChange={e => setPrefix(e.target.value)} 
+                    onChange={e => updateContextEngine({ prefix: e.target.value })} 
                     style={{ width: '100%', minHeight: '60px', padding: '0.5rem', fontSize: '0.8rem', fontFamily: 'monospace', borderRadius: '4px', border: '1px solid #e2e8f0', backgroundColor: '#fff' }} 
                   />
                 )}
@@ -370,133 +466,108 @@ export default function ContextEngine() {
                     <input type="checkbox" checked={historyEnabled} onChange={e => handleHistoryEnabledChange(e.target.checked)} />
                     <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b' }}>ACTIVE CONTEXT CHAIN</span>
                   </div>
-                  <button onClick={() => setHistoryCollapsed(!historyCollapsed)} disabled={!historyEnabled} style={{ background: 'none', border: 'none', cursor: historyEnabled ? 'pointer' : 'not-allowed', fontSize: '0.7rem', color: historyEnabled ? '#94a3b8' : '#cbd5e1' }}>
+                  <button onClick={() => updateContextEngine({ historyCollapsed: !historyCollapsed })} disabled={!historyEnabled} style={{ background: 'none', border: 'none', cursor: historyEnabled ? 'pointer' : 'not-allowed', fontSize: '0.7rem', color: historyEnabled ? '#94a3b8' : '#cbd5e1' }}>
                     {historyCollapsed ? 'EXPAND' : 'COLLAPSE'}
                   </button>
                 </div>
                 
                 {!historyCollapsed && historyEnabled && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <input type="checkbox" checked={includeThinkingInContext} onChange={e => setIncludeThinkingInContext(e.target.checked)} />
+                    <input type="checkbox" checked={globalSettings.includeThinkingInContext} onChange={e => updateGlobalSettings({ includeThinkingInContext: e.target.checked })} />
                     <span style={{ fontSize: '0.7rem', color: '#64748b' }}>Include thinking in context</span>
                   </div>
                 )}
                 
                 {!historyCollapsed && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                    {transcript.map((msg, idx) => {
-                    const ovr = overrides[idx] || {};
-                    const isUser = msg.role === 'user';
-                    const isThinkingExcluded = !!ovr?.reasoningExcluded;
-                    
-                    if (isUser) {
+                    {transcript.map((msg) => {
+                      const ovr = overrides[msg.id] || {};
+                      const isUser = msg.role === 'user';
+                      const isThinkingExcluded = !!ovr?.reasoningExcluded;
+                      const idx = transcript.indexOf(msg);
+                      
+                      if (isUser) {
+                        return (
+                          <div key={msg.id} style={{ padding: '0.75rem', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: ovr.excluded ? '#f1f5f9' : '#fff', opacity: ovr.excluded ? 0.6 : 1 }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                                <span style={{ fontSize: '0.65rem', fontWeight: 800, color: '#94a3b8' }}>USER (T-{idx})</span>
+                                <button onClick={() => resetTurn(msg.id)} style={{ fontSize: '0.7rem', cursor: 'pointer', color: '#ef4444', background: 'none', border: '1px solid #fee2e2', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
+                                  Reset
+                                </button>
+                              </div>
+                              <textarea 
+                                value={ovr.content !== undefined ? ovr.content : msg.content}
+                                onChange={(e) => updateOverride(msg.id, { content: e.target.value })}
+                                style={{ width: '100%', border: 'none', background: 'none', fontSize: '0.8rem', resize: 'vertical', outline: 'none', fontFamily: 'inherit', minHeight: '40px' }}
+                              />
+                              <button 
+                                onClick={() => updateOverride(msg.id, { excluded: !ovr?.excluded })}
+                                style={{ fontSize: '0.65rem', cursor: 'pointer', marginTop: '0.5rem', border: '1px solid #e2e8f0', background: '#fff', borderRadius: '4px', padding: '0.2rem 0.4rem' }}
+                              >
+                                {ovr?.excluded ? 'INCLUDE' : 'EXCLUDE'}
+                              </button>
+                            </div>
+                        );
+                      }
+                      
                       return (
-                        <div key={idx} style={{ padding: '0.75rem', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: ovr.excluded ? '#f1f5f9' : '#fff', opacity: ovr.excluded ? 0.6 : 1 }}>
+                        <div key={msg.id} style={{ padding: '0.75rem', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: ovr.excluded ? '#f1f5f9' : '#fff', opacity: ovr.excluded ? 0.6 : 1 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                            <span style={{ fontSize: '0.65rem', fontWeight: 800, color: '#94a3b8' }}>USER (T-{idx})</span>
-                            <button 
-                              onClick={() => resetTurn(idx)}
-                              style={{ fontSize: '0.7rem', cursor: 'pointer', color: '#ef4444', background: 'none', border: '1px solid #fee2e2', padding: '0.2rem 0.5rem', borderRadius: '4px' }}
-                            >
+                            <span style={{ fontSize: '0.65rem', fontWeight: 800, color: '#94a3b8' }}>ASSISTANT (T-{idx})</span>
+                            <button onClick={() => resetTurn(msg.id)} style={{ fontSize: '0.6rem', cursor: 'pointer', color: '#ef4444', background: 'none', border: 'none', fontWeight: 600 }}>
                               Reset
                             </button>
                           </div>
-                          <textarea 
-                            value={ovr.content !== undefined ? ovr.content : msg.content}
-                            onChange={(e) => setOverrides(prev => ({ ...prev, [idx]: { ...prev[idx], content: e.target.value } }))}
-                            style={{ width: '100%', border: 'none', background: 'none', fontSize: '0.8rem', resize: 'vertical', outline: 'none', fontFamily: 'inherit', minHeight: '40px' }}
-                          />
-                          <button 
-                            onClick={() => setOverrides(prev => ({ ...prev, [idx]: { ...prev[idx], excluded: !ovr?.excluded } }))}
-                            style={{ fontSize: '0.65rem', cursor: 'pointer', marginTop: '0.5rem', border: '1px solid #e2e8f0', background: '#fff', borderRadius: '4px', padding: '0.2rem 0.4rem' }}
-                          >
-                            {ovr?.excluded ? 'INCLUDE' : 'EXCLUDE'}
-                          </button>
-                        </div>
-                      );
-                    }
-                    
-                    return (
-                      <div key={idx} style={{ padding: '0.75rem', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: ovr.excluded ? '#f1f5f9' : '#fff', opacity: ovr.excluded ? 0.6 : 1 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                          <span style={{ fontSize: '0.65rem', fontWeight: 800, color: '#94a3b8' }}>ASSISTANT (T-{idx})</span>
-                          <button 
-                            onClick={() => resetTurn(idx)}
-                            style={{ fontSize: '0.6rem', cursor: 'pointer', color: '#ef4444', background: 'none', border: 'none', fontWeight: 600 }}
-                          >
-                            Reset
-                          </button>
-                        </div>
+                          
+                          {msg.reasoningContent && globalSettings.includeThinkingInContext && (
+                            <div style={{ marginBottom: '0.5rem', opacity: isThinkingExcluded ? 0.5 : 1 }}>
+                              <button 
+                                onClick={() => updateContextEngine({ expandedContextThinking: { ...expandedContextThinking, [msg.id]: !expandedContextThinking[msg.id] } })}
+                                style={{ fontSize: '0.65rem', color: '#94a3b8', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
+                              >
+                                {expandedContextThinking[msg.id] ? '▼' : '▶'} Thinking
+                              </button>
+                              {expandedContextThinking[msg.id] && (
+                                <div style={{ marginTop: '0.25rem' }}>
+                                  <textarea
+                                    value={ovr.reasoningContent !== undefined ? ovr.reasoningContent : msg.reasoningContent}
+                                    onChange={(e) => updateOverride(msg.id, { reasoningContent: e.target.value })}
+                                    style={{ width: '100%', border: 'none', background: 'none', fontSize: '0.8rem', resize: 'vertical', outline: 'none', fontFamily: 'inherit', minHeight: '40px', color: '#94a3b8', fontStyle: 'italic' }}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          )}
                         
-                        {msg.reasoningContent && includeThinkingInContext && (
-                          <div style={{ marginBottom: '0.5rem', opacity: isThinkingExcluded ? 0.5 : 1 }}>
+                        <textarea
+                          value={ovr.content !== undefined ? ovr.content : msg.content}
+                          onChange={(e) => updateOverride(msg.id, { content: e.target.value })}
+                          style={{ width: '100%', border: 'none', background: 'none', fontSize: '0.8rem', resize: 'vertical', outline: 'none', fontFamily: 'inherit', minHeight: '40px' }}
+                        />
+                        
+                          <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.25rem' }}>
                             <button 
-                              onClick={() => setExpandedContextThinking(prev => ({ ...prev, [idx]: !prev[idx] }))}
-                              style={{ 
-                                fontSize: '0.65rem', 
-                                color: '#94a3b8', 
-                                background: 'none', 
-                                border: 'none', 
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.3rem'
-                              }}
-                            >
-                              {expandedContextThinking[idx] ? '▼' : '▶'} Thinking
-                            </button>
-                            {expandedContextThinking[idx] && (
-                              <div style={{ marginTop: '0.25rem' }}>
-                                <textarea
-                                  value={ovr.reasoningContent !== undefined ? ovr.reasoningContent : msg.reasoningContent}
-                                  onChange={(e) => setOverrides(prev => ({ ...prev, [idx]: { ...prev[idx], reasoningContent: e.target.value } }))}
-                                  style={{ 
-                                    width: '100%', 
-                                    border: 'none', 
-                                    background: 'none', 
-                                    fontSize: '0.8rem', 
-                                    resize: 'vertical', 
-                                    outline: 'none', 
-                                    fontFamily: 'inherit', 
-                                    minHeight: '40px',
-                                    color: '#94a3b8',
-                                    fontStyle: 'italic'
-                                  }}
-                                />
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      
-                      <textarea
-                        value={ovr.content !== undefined ? ovr.content : msg.content}
-                        onChange={(e) => setOverrides(prev => ({ ...prev, [idx]: { ...prev[idx], content: e.target.value } }))}
-                        style={{ width: '100%', border: 'none', background: 'none', fontSize: '0.8rem', resize: 'vertical', outline: 'none', fontFamily: 'inherit', minHeight: '40px' }}
-                      />
-                      
-                        <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.25rem' }}>
-                          <button 
-                            onClick={() => setOverrides(prev => ({ ...prev, [idx]: { ...prev[idx], excluded: !ovr?.excluded, reasoningExcluded: !ovr?.excluded ? true : prev[idx]?.reasoningExcluded } }))}
-                            style={{ fontSize: '0.65rem', cursor: 'pointer', border: '1px solid #e2e8f0', background: '#fff', borderRadius: '4px', padding: '0.2rem 0.4rem' }}
-                          >
-                            {ovr?.excluded ? 'INCLUDE' : 'EXCLUDE'}
-                          </button>
-                          {msg.reasoningContent && includeThinkingInContext && (
-                            <button 
-                              onClick={() => setOverrides(prev => ({ ...prev, [idx]: { ...prev[idx], reasoningExcluded: !prev[idx]?.reasoningExcluded } }))}
+                              onClick={() => updateOverride(msg.id, { excluded: !ovr?.excluded, reasoningExcluded: !ovr?.excluded ? true : ovr?.reasoningExcluded })}
                               style={{ fontSize: '0.65rem', cursor: 'pointer', border: '1px solid #e2e8f0', background: '#fff', borderRadius: '4px', padding: '0.2rem 0.4rem' }}
                             >
-                              {ovr?.reasoningExcluded ? 'INCLUDE THINKING' : 'EXCLUDE THINKING'}
+                              {ovr?.excluded ? 'INCLUDE' : 'EXCLUDE'}
                             </button>
-                          )}
+                            {msg.reasoningContent && globalSettings.includeThinkingInContext && (
+                              <button 
+                                onClick={() => updateOverride(msg.id, { reasoningExcluded: !ovr?.reasoningExcluded })}
+                                style={{ fontSize: '0.65rem', cursor: 'pointer', border: '1px solid #e2e8f0', background: '#fff', borderRadius: '4px', padding: '0.2rem 0.4rem' }}
+                              >
+                                {ovr?.reasoningExcluded ? 'INCLUDE THINKING' : 'EXCLUDE THINKING'}
+                              </button>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                  {transcript.length === 0 && <div style={{ fontSize: '0.8rem', color: '#94a3b8', textAlign: 'center', padding: '2rem' }}>No transcript yet.</div>}
-                </div>
-              )}
-            </div>
+                      );
+                    })}
+                    {transcript.length === 0 && <div style={{ fontSize: '0.8rem', color: '#94a3b8', textAlign: 'center', padding: '2rem' }}>No transcript yet.</div>}
+                  </div>
+                )}
+              </div>
             </>
           )}
         </div>
@@ -506,7 +577,7 @@ export default function ContextEngine() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
             <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b' }}>EXECUTION FLOW</span>
             <label style={{ fontSize: '0.7rem', fontWeight: 600, color: '#64748b', display: 'flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer' }}>
-              <input type="checkbox" checked={stepMode} onChange={e => setStepMode(e.target.checked)} /> Step Mode
+              <input type="checkbox" checked={globalSettings.stepMode} onChange={e => updateGlobalSettings({ stepMode: e.target.checked })} /> Step Mode
             </label>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -523,14 +594,18 @@ export default function ContextEngine() {
         </div>
       </aside>
 
+      {/* ========================================
+         RIGHT PANEL: CANONICAL TRANSCRIPT
+         Contains: Full conversation display, chat input
+         ======================================== */}
       {/* RIGHT: TRANSCRIPT */}
       <section style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#fff' }}>
         <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800 }}>CANONICAL TRANSCRIPT</h2>
-            {(stepMode || !prefixEnabled || !historyEnabled || !includeThinkingInContext) && (
+            {(globalSettings.stepMode || !prefixEnabled || !historyEnabled || !globalSettings.includeThinkingInContext) && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                {stepMode && (
+                {globalSettings.stepMode && (
                   <span style={{ fontSize: '0.65rem', color: '#3b82f6', fontWeight: 700, padding: '0.15rem 0.4rem', backgroundColor: '#eff6ff', borderRadius: '4px' }}>
                     Step mode enabled
                   </span>
@@ -545,7 +620,7 @@ export default function ContextEngine() {
                     History excluded
                   </span>
                 )}
-                {!includeThinkingInContext && (
+                {!globalSettings.includeThinkingInContext && (
                   <span style={{ fontSize: '0.65rem', color: '#d97706', fontWeight: 600, padding: '0.15rem 0.4rem', backgroundColor: '#fffbeb', borderRadius: '4px' }}>
                     Thinking excluded
                   </span>
@@ -561,9 +636,9 @@ export default function ContextEngine() {
         <div style={{ flex: 1, overflowY: 'auto', padding: '2rem' }}>
           <div style={{ maxWidth: '700px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2.5rem' }}>
             {transcript.map((msg, i) => {
-              const ovr = overrides[i];
+              const ovr = overrides[msg.id];
               const isUser = msg.role === 'user';
-              const showSnapshot = viewingSnapshotIndex === i;
+              const showSnapshot = viewingSnapshotIndex === msg.id;
               const isExcluded = !!ovr?.excluded;
               const isContentEdited = ovr?.content !== undefined;
               const isThinkingEdited = ovr?.reasoningContent !== undefined;
@@ -571,41 +646,22 @@ export default function ContextEngine() {
               const hasContent = msg.content.length > 0;
 
               return (
-                <div key={i} style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
+                <div key={msg.id} style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
                   <div style={{ backgroundColor: isUser ? '#3b82f6' : '#1e293b', color: 'white', width: '24px', height: '24px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '0.65rem', flexShrink: 0, marginTop: '4px' }}>
                     {isUser ? 'U' : 'AI'}
                   </div>
                   <div style={{ flex: 1 }}>
-                    {/* REASONING/THINKING - above content, always shown */}
+                    {/* REASONING/THINKING */}
                     {msg.reasoningContent && hasContent && (
                       <div style={{ marginBottom: '0.5rem' }}>
                         <button
-                          onClick={() => setExpandedThinking(prev => ({ ...prev, [i]: !prev[i] }))}
-                          style={{
-                            fontSize: '0.7rem',
-                            color: '#94a3b8',
-                            background: 'none',
-                            border: 'none',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.3rem',
-                            textDecoration: isExcluded || isThinkingEdited || isThinkingExcluded ? 'line-through' : 'none'
-                          }}
+                          onClick={() => updateContextEngine({ expandedThinking: { ...expandedThinking, [msg.id]: !expandedThinking[msg.id] } })}
+                          style={{ fontSize: '0.7rem', color: '#94a3b8', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.3rem', textDecoration: isExcluded || isThinkingEdited || isThinkingExcluded ? 'line-through' : 'none' }}
                         >
-                          {expandedThinking[i] ? '▼' : '▶'} Thinking ({msg.reasoningContent.length} chars)
+                          {expandedThinking[msg.id] ? '▼' : '▶'} Thinking ({msg.reasoningContent.length} chars)
                         </button>
-                        {expandedThinking[i] && (
-                          <pre style={{
-                            margin: '0.5rem 0',
-                            padding: '0.5rem',
-                            fontSize: '0.8rem',
-                            whiteSpace: 'pre-wrap',
-                            fontFamily: 'monospace',
-                            color: '#94a3b8',
-                            fontStyle: 'italic',
-                            textDecoration: isExcluded || isThinkingEdited || isThinkingExcluded ? 'line-through' : 'none'
-                          }}>
+                        {expandedThinking[msg.id] && (
+                          <pre style={{ margin: '0.5rem 0', padding: '0.5rem', fontSize: '0.8rem', whiteSpace: 'pre-wrap', fontFamily: 'monospace', color: '#94a3b8', fontStyle: 'italic', textDecoration: isExcluded || isThinkingEdited || isThinkingExcluded ? 'line-through' : 'none' }}>
                             {msg.reasoningContent}
                           </pre>
                         )}
@@ -623,10 +679,20 @@ export default function ContextEngine() {
                       }}>
                         {msg.content || (chatStatus === 'loading' && i === transcript.length - 1 ? '...' : '')}
                       </div>
+                      {msg.retryInfo && (
+                        <div style={{ 
+                          fontSize: '0.7rem', 
+                          color: '#f59e0b', 
+                          marginTop: '0.5rem',
+                          fontStyle: 'italic'
+                        }}>
+                          Retried {msg.retryInfo.retries} time{msg.retryInfo.retries !== 1 ? 's' : ''} after failure
+                        </div>
+                      )}
                       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', marginLeft: '1rem' }}>
                         {isUser && msg.contextSnapshot && (
                           <button 
-                            onClick={() => setViewingSnapshotIndex(showSnapshot ? null : i)}
+                            onClick={() => updateContextEngine({ viewingSnapshotIndex: showSnapshot ? null : msg.id })}
                             style={{ fontSize: '0.65rem', color: '#3b82f6', background: 'none', border: '1px solid #bfdbfe', borderRadius: '4px', padding: '0.2rem 0.4rem', cursor: 'pointer', whiteSpace: 'nowrap' }}
                           >
                             {showSnapshot ? 'HIDE CONTEXT' : 'VIEW CONTEXT'}
@@ -635,7 +701,7 @@ export default function ContextEngine() {
                       </div>
                     </div>
 
-                    {/* SHOW OVERRIDE CONTENT BELOW CROSSED OUT ORIGINAL */}
+                    {/* SHOW OVERRIDE CONTENT */}
                     {isThinkingEdited && !isThinkingExcluded && !isExcluded && (
                       <div style={{ marginTop: '0.75rem', padding: '0.75rem', borderLeft: '3px solid #d97706', backgroundColor: '#fffbeb', borderRadius: '0 4px 4px 0' }}>
                         <div style={{ fontSize: '0.65rem', fontWeight: 700, color: '#b45309', marginBottom: '0.25rem', textTransform: 'uppercase' }}>Thinking Override:</div>

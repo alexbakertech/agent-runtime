@@ -1,10 +1,26 @@
 'use client';
 
+/**
+ * Configure & Test Page - API Profile Management
+ * 
+ * Features:
+ * - Profile Management: Create, edit, delete API configurations
+ * - Connection Testing: Verify profile works with API
+ * - Model Fetching: Retrieve available models from endpoint
+ * - Test Chat: Send messages to verify configuration
+ * - Settings: Browser API consent, retry configuration
+ * 
+ * This page handles all API configuration for the application.
+ */
+
 import { useState, useEffect, useRef } from 'react';
-import { testConnection, fetchModels, chatStreamWithReasoning, setBrowserConsent, isBrowserConsentGiven, BrowserConsentRequiredError } from '@/lib/api/client';
+import { testConnection, fetchModels, chatStreamWithReasoning, isBrowserConsentGiven, BrowserConsentRequiredError } from '@/lib/api/client';
+import { useProfiles, useBrowserConsent, useRetryEnabled } from '@/lib/state';
 
-const PROFILES_KEY = 'agent_runtime_profiles';
-
+/**
+ * Profile configuration interface
+ * Represents an API profile with connection details
+ */
 interface Config {
   name: string;
   baseUrl: string;
@@ -16,30 +32,29 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   reasoningContent?: string;
+  retryInfo?: { retries: number };
 }
 
 export default function Home() {
+  const { profiles, activeProfile, addProfile, updateProfile, deleteProfile, setActiveProfile } = useProfiles();
+  const { browserConsent, setBrowserConsent } = useBrowserConsent();
+  const { retryEnabled, setRetryEnabled } = useRetryEnabled();
+
   const [config, setConfig] = useState<Config>({
     name: 'Default',
     baseUrl: 'http://localhost:8080/v1',
     apiKey: 'sk-no-key-required',
     model: '',
   });
-  const [profiles, setProfiles] = useState<Config[]>([]);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [status, setStatus] = useState<{ type: 'idle' | 'loading' | 'success' | 'error'; message: string }>({
     type: 'idle',
     message: '',
   });
 
-  // UI State
-  const [profilesCollapsed, setProfilesCollapsed] = useState(false);
-  const [configCollapsed, setConfigCollapsed] = useState(false);
   const [editingName, setEditingName] = useState<string | null>(null);
-  const [browserConsent, setBrowserConsentState] = useState(false);
   const [showConsentWarning, setShowConsentWarning] = useState(false);
 
-  // Chat state
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [chatStatus, setChatStatus] = useState<'idle' | 'loading' | 'error'>('idle');
@@ -49,7 +64,6 @@ export default function Home() {
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-resize textarea
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
@@ -58,30 +72,23 @@ export default function Home() {
     }
   }, [input]);
 
-  // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   useEffect(() => {
-    const saved = localStorage.getItem(PROFILES_KEY);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        setProfiles(parsed);
-        if (parsed.length > 0) {
-          setConfig(parsed[0]);
-          setEditingName(parsed[0].name);
-        }
-      } catch (e) {
-        console.error('Failed to parse saved profiles', e);
-      }
+    if (activeProfile) {
+      setConfig({
+        name: activeProfile.name,
+        baseUrl: activeProfile.baseUrl,
+        apiKey: activeProfile.apiKey,
+        model: activeProfile.model,
+      });
+      setEditingName(activeProfile.name);
+    } else if (profiles.length > 0) {
+      setActiveProfile(profiles[0].id);
     }
-  }, []);
-
-  useEffect(() => {
-    setBrowserConsentState(isBrowserConsentGiven());
-  }, []);
+  }, [activeProfile, profiles, setActiveProfile]);
 
   const saveProfile = () => {
     if (availableModels.length > 0 && config.model && !availableModels.includes(config.model)) {
@@ -89,47 +96,39 @@ export default function Home() {
       return;
     }
 
-    const nameConflict = profiles.find(p => p.name === config.name && p.name !== editingName);
+    const nameConflict = profiles.find(p => p.name === config.name && p.id !== activeProfile?.id);
     if (nameConflict) {
       setStatus({ type: 'error', message: 'Profile name already exists.' });
       return;
     }
 
-    let newProfiles;
-    if (editingName) {
-      const existingIndex = profiles.findIndex(p => p.name === editingName);
-      if (existingIndex >= 0) {
-        newProfiles = profiles.map((p, i) => i === existingIndex ? config : p);
-      } else {
-        newProfiles = [...profiles, config];
-      }
+    if (editingName && activeProfile && editingName === activeProfile.name) {
+      updateProfile(activeProfile.id, {
+        name: config.name,
+        baseUrl: config.baseUrl,
+        apiKey: config.apiKey,
+        model: config.model,
+      });
     } else {
-      newProfiles = [...profiles, config];
+      const newProfile = addProfile(config.name, config.baseUrl, config.model, config.apiKey);
+      setActiveProfile(newProfile.id);
     }
 
-    setProfiles(newProfiles);
-    localStorage.setItem(PROFILES_KEY, JSON.stringify(newProfiles));
     setEditingName(config.name);
     setStatus({ type: 'success', message: `Saved.` });
     setTimeout(() => setStatus({ type: 'idle', message: '' }), 3000);
   };
 
-  const loadProfile = (name: string) => {
-    const profile = profiles.find(p => p.name === name);
-    if (profile) {
-      setConfig(profile);
-      setEditingName(name);
-      setAvailableModels([]);
-      setMessages([]);
-      setStatus({ type: 'idle', message: '' });
-    }
+  const loadProfile = (profileId: string) => {
+    setActiveProfile(profileId);
+    setAvailableModels([]);
+    setMessages([]);
+    setStatus({ type: 'idle', message: '' });
   };
 
-  const deleteProfile = (name: string) => {
-    const newProfiles = profiles.filter(p => p.name !== name);
-    setProfiles(newProfiles);
-    localStorage.setItem(PROFILES_KEY, JSON.stringify(newProfiles));
-    if (editingName === name) {
+  const handleDeleteProfile = (profileId: string) => {
+    deleteProfile(profileId);
+    if (activeProfile?.id === profileId) {
       startNewProfile();
     }
   };
@@ -218,8 +217,13 @@ export default function Home() {
     abortControllerRef.current = controller;
 
     try {
+      let capturedRetryInfo: { retries: number } | undefined;
       for await (const chunk of chatStreamWithReasoning(config, currentInput)) {
         if (controller.signal.aborted) break;
+        if (chunk.retryInfo) {
+          capturedRetryInfo = chunk.retryInfo;
+          continue;
+        }
         setMessages(prev => {
           const newMessages = [...prev];
           const lastIdx = newMessages.length - 1;
@@ -230,6 +234,9 @@ export default function Home() {
             }
             if (chunk.reasoning) {
               updated.reasoningContent = (updated.reasoningContent || '') + chunk.reasoning;
+            }
+            if (capturedRetryInfo) {
+              updated.retryInfo = capturedRetryInfo;
             }
             newMessages[lastIdx] = updated;
           }
@@ -248,36 +255,25 @@ export default function Home() {
       } else {
         setMessages(prev => {
           const newMessages = [...prev];
-          const lastIdx = newMessages.length - 1;
-          if (newMessages[lastIdx].role === 'assistant') {
-            newMessages[lastIdx] = {
-              ...newMessages[lastIdx],
-              content: newMessages[lastIdx].content + `\n\n**Error:** ${err.message}`
-            };
-          }
+          newMessages[newMessages.length - 1] = {
+            ...newMessages[newMessages.length - 1],
+            content: `Error: ${err.message}`,
+          };
           return newMessages;
         });
         setChatStatus('error');
       }
-    } finally {
-      abortControllerRef.current = null;
     }
   };
 
-  const handleStop = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-  };
-
-  const SectionHeader = ({ label, isCollapsed, onToggle }: { label: string, isCollapsed: boolean, onToggle: () => void }) => (
+  const SectionHeader = ({ label, isCollapsed, onToggle }: { label: string; isCollapsed: boolean; onToggle: () => void }) => (
     <div 
       onClick={onToggle}
       style={{ 
         display: 'flex', 
         justifyContent: 'space-between', 
-        alignItems: 'center', 
-        marginBottom: '0.75rem', 
+        alignItems: 'center',
+        padding: '0.75rem 0',
         cursor: 'pointer',
         userSelect: 'none'
       }}
@@ -289,10 +285,15 @@ export default function Home() {
     </div>
   );
 
+  /* ============================================
+     RENDER
+     ============================================ */
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 60px)', fontFamily: 'system-ui', color: '#1a1a1a', backgroundColor: '#fdfdfd' }}>
       
-      {/* LEFT SIDEBAR - Navigation & Settings */}
+      {/* ========================================
+         LEFT SIDEBAR: Profile & Configuration
+         ======================================== */}
       <aside style={{ 
         width: '320px', 
         backgroundColor: '#f8fafc', 
@@ -302,126 +303,129 @@ export default function Home() {
         overflowY: 'auto'
       }}>
         <div style={{ padding: '1.5rem' }}>
-          {/* PROFILES SECTION */}
-          <SectionHeader label="Profiles" isCollapsed={profilesCollapsed} onToggle={() => setProfilesCollapsed(!profilesCollapsed)} />
-          {!profilesCollapsed && (
-            <div style={{ marginBottom: '2rem' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginBottom: '0.75rem' }}>
-                {profiles.map((p) => (
-                  <div 
-                    key={p.name} 
-                    onClick={() => loadProfile(p.name)}
-                    style={{ 
-                      padding: '0.6rem 0.75rem', 
-                      borderRadius: '6px', 
-                      cursor: 'pointer',
-                      backgroundColor: editingName === p.name ? '#fff' : 'transparent',
-                      border: `1px solid ${editingName === p.name ? '#e2e8f0' : 'transparent'}`,
-                      boxShadow: editingName === p.name ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center'
-                    }}
-                  >
-                    <span style={{ fontSize: '0.875rem', fontWeight: editingName === p.name ? 600 : 400, color: editingName === p.name ? '#0f172a' : '#475569' }}>{p.name}</span>
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); deleteProfile(p.name); }}
-                      style={{ border: 'none', background: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '0.75rem', padding: '0.2rem' }}
-                    >✕</button>
-                  </div>
-                ))}
-              </div>
-              <button 
-                onClick={startNewProfile}
-                style={{ 
-                  width: '100%',
-                  padding: '0.5rem',
-                  backgroundColor: '#fff', 
-                  border: '1px dashed #cbd5e1', 
-                  borderRadius: '6px', 
-                  cursor: 'pointer',
-                  fontSize: '0.8rem',
-                  color: '#64748b',
-                  fontWeight: 500
-                }}
-              >+ New Profile</button>
-            </div>
-          )}
-
-          {/* CONFIGURATION SECTION */}
-          <SectionHeader label="Configuration" isCollapsed={configCollapsed} onToggle={() => setConfigCollapsed(!configCollapsed)} />
-          {!configCollapsed && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                <label style={{ fontSize: '0.7rem', fontWeight: 600, color: '#94a3b8' }}>PROFILE NAME</label>
-                <input value={config.name} onChange={(e) => updateConfig({ name: e.target.value })} style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.85rem' }} />
-              </div>
-              
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                <label style={{ fontSize: '0.7rem', fontWeight: 600, color: '#94a3b8' }}>BASE URL</label>
-                <input value={config.baseUrl} onChange={(e) => updateConfig({ baseUrl: e.target.value })} placeholder="http://..." style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.85rem' }} />
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                <label style={{ fontSize: '0.7rem', fontWeight: 600, color: '#94a3b8' }}>API KEY</label>
-                <input type="password" value={config.apiKey} onChange={(e) => updateConfig({ apiKey: e.target.value })} placeholder="Optional" style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.85rem' }} />
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                <label style={{ fontSize: '0.7rem', fontWeight: 600, color: '#94a3b8' }}>MODEL</label>
-                <div style={{ display: 'flex', gap: '0.4rem' }}>
-                  {availableModels.length > 0 ? (
-                    <select value={config.model} onChange={(e) => updateConfig({ model: e.target.value })} style={{ flex: 1, padding: '0.5rem', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.85rem' }}>
-                      {availableModels.map(m => <option key={m} value={m}>{m}</option>)}
-                    </select>
-                  ) : (
-                    <input value={config.model} onChange={(e) => updateConfig({ model: e.target.value })} placeholder="e.g. default" style={{ flex: 1, padding: '0.5rem', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.85rem' }} />
-                  )}
-                  <button onClick={handleFetchModels} style={{ padding: '0 0.5rem', border: '1px solid #e2e8f0', borderRadius: '6px', background: '#fff', fontSize: '0.7rem', color: '#64748b', cursor: 'pointer' }}>Fetch</button>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
-                <input
-                  type="checkbox"
-                  id="browser-consent"
-                  checked={browserConsent}
-                  onChange={(e) => {
-                    setBrowserConsentState(e.target.checked);
-                    setBrowserConsent(e.target.checked);
+          <SectionHeader label="Profiles" isCollapsed={false} onToggle={() => {}} />
+          <div style={{ marginBottom: '2rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginBottom: '0.75rem' }}>
+              {profiles.map((p) => (
+                <div 
+                  key={p.id} 
+                  onClick={() => loadProfile(p.id)}
+                  style={{ 
+                    padding: '0.6rem 0.75rem', 
+                    borderRadius: '6px', 
+                    cursor: 'pointer',
+                    backgroundColor: activeProfile?.id === p.id ? '#fff' : 'transparent',
+                    border: `1px solid ${activeProfile?.id === p.id ? '#e2e8f0' : 'transparent'}`,
+                    boxShadow: activeProfile?.id === p.id ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
                   }}
-                />
-                <label htmlFor="browser-consent" style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                  Allow browser API calls (required for local models)
-                </label>
-              </div>
-
-              <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
-                <button onClick={handleTest} style={{ flex: 1, padding: '0.6rem', borderRadius: '6px', border: '1px solid #0070f3', backgroundColor: '#fff', color: '#0070f3', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}>Test</button>
-                <button onClick={saveProfile} style={{ flex: 1, padding: '0.6rem', borderRadius: '6px', border: 'none', backgroundColor: '#0070f3', color: '#fff', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}>Save</button>
-              </div>
-              
-              {status.message && (
-                <div style={{ 
-                  fontSize: '0.75rem', 
-                  padding: '0.6rem', 
-                  borderRadius: '6px', 
-                  textAlign: 'center',
-                  backgroundColor: status.type === 'error' ? '#fee2e2' : '#f0fdf4', 
-                  color: status.type === 'error' ? '#991b1b' : '#166534' 
-                }}>
-                  {status.message}
+                >
+                  <span style={{ fontSize: '0.875rem', fontWeight: activeProfile?.id === p.id ? 600 : 400, color: activeProfile?.id === p.id ? '#0f172a' : '#475569' }}>{p.name}</span>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); handleDeleteProfile(p.id); }}
+                    style={{ border: 'none', background: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '0.75rem', padding: '0.2rem' }}
+                  >✕</button>
                 </div>
-              )}
+              ))}
             </div>
-          )}
+            <button 
+              onClick={startNewProfile}
+              style={{ 
+                width: '100%',
+                padding: '0.5rem',
+                backgroundColor: '#fff', 
+                border: '1px dashed #cbd5e1', 
+                borderRadius: '6px', 
+                cursor: 'pointer',
+                fontSize: '0.8rem',
+                color: '#64748b',
+                fontWeight: 500
+              }}
+            >+ New Profile</button>
+          </div>
+
+          <SectionHeader label="Configuration" isCollapsed={false} onToggle={() => {}} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+              <label style={{ fontSize: '0.7rem', fontWeight: 600, color: '#94a3b8' }}>PROFILE NAME</label>
+              <input value={config.name} onChange={(e) => updateConfig({ name: e.target.value })} style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.85rem' }} />
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+              <label style={{ fontSize: '0.7rem', fontWeight: 600, color: '#94a3b8' }}>BASE URL</label>
+              <input value={config.baseUrl} onChange={(e) => updateConfig({ baseUrl: e.target.value })} placeholder="http://..." style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.85rem' }} />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+              <label style={{ fontSize: '0.7rem', fontWeight: 600, color: '#94a3b8' }}>API KEY</label>
+              <input type="password" value={config.apiKey} onChange={(e) => updateConfig({ apiKey: e.target.value })} placeholder="Optional" style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.85rem' }} />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+              <label style={{ fontSize: '0.7rem', fontWeight: 600, color: '#94a3b8' }}>MODEL</label>
+              <div style={{ display: 'flex', gap: '0.4rem' }}>
+                {availableModels.length > 0 ? (
+                  <select value={config.model} onChange={(e) => updateConfig({ model: e.target.value })} style={{ flex: 1, padding: '0.5rem', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.85rem' }}>
+                      {availableModels.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                ) : (
+                  <input value={config.model} onChange={(e) => updateConfig({ model: e.target.value })} placeholder="e.g. default" style={{ flex: 1, padding: '0.5rem', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.85rem' }} />
+                )}
+                <button onClick={handleFetchModels} style={{ padding: '0 0.5rem', border: '1px solid #e2e8f0', borderRadius: '6px', background: '#fff', fontSize: '0.7rem', color: '#64748b', cursor: 'pointer' }}>Fetch</button>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
+              <input
+                type="checkbox"
+                id="browser-consent"
+                checked={browserConsent ?? false}
+                onChange={(e) => setBrowserConsent(e.target.checked)}
+              />
+              <label htmlFor="browser-consent" style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                Allow browser API calls
+              </label>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
+              <input
+                type="checkbox"
+                id="retry-enabled"
+                checked={retryEnabled ?? false}
+                onChange={(e) => setRetryEnabled(e.target.checked)}
+              />
+              <label htmlFor="retry-enabled" style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                Retry on failure (exponential backoff)
+              </label>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+              <button onClick={handleTest} style={{ flex: 1, padding: '0.6rem', borderRadius: '6px', border: '1px solid #0070f3', backgroundColor: '#fff', color: '#0070f3', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}>Test</button>
+              <button onClick={saveProfile} style={{ flex: 1, padding: '0.6rem', borderRadius: '6px', border: 'none', backgroundColor: '#0070f3', color: '#fff', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}>Save</button>
+            </div>
+            
+            {status.message && (
+              <div style={{ 
+                fontSize: '0.75rem', 
+                padding: '0.6rem', 
+                borderRadius: '6px', 
+                textAlign: 'center',
+                backgroundColor: status.type === 'error' ? '#fee2e2' : '#f0fdf4', 
+                color: status.type === 'error' ? '#991b1b' : '#166534' 
+              }}>
+                {status.message}
+              </div>
+            )}
+          </div>
         </div>
       </aside>
 
-      {/* MAIN CONTENT - Chat Area */}
+      {/* ========================================
+         MAIN CONTENT: Test Chat Interface
+         ======================================== */}
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
-        
-        {/* Chat History View */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '3rem' }}>
           <div style={{ maxWidth: '800px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2.5rem' }}>
             {messages.length > 0 ? (
@@ -480,124 +484,93 @@ export default function Home() {
                           )}
                         </div>
                       )}
-                      <div style={{ 
-                        whiteSpace: 'pre-wrap', 
-                        lineHeight: 1.6, 
-                        fontSize: '1.05rem', 
-                        color: '#1e293b'
-                      }}>
+                      <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
                         {msg.content}
                       </div>
+                      {msg.retryInfo && (
+                        <div style={{ 
+                          fontSize: '0.7rem', 
+                          color: '#f59e0b', 
+                          marginTop: '0.5rem',
+                          fontStyle: 'italic'
+                        }}>
+                          Retried {msg.retryInfo.retries} time{msg.retryInfo.retries !== 1 ? 's' : ''} after failure
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
-                <div ref={messagesEndRef} />
               </>
             ) : (
-              <div style={{ display: 'flex', height: '60vh', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '1rem' }}>
-                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#e2e8f0' }}>READY</div>
-                <div style={{ color: '#94a3b8', fontSize: '0.875rem' }}>
-                  {chatStatus === 'loading' ? 'Thinking...' : `Connected to ${config.name}`}
-                </div>
+              <div style={{ textAlign: 'center', color: '#94a3b8', padding: '3rem 0' }}>
+                <p style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>Configure a profile and send a message to start chatting.</p>
               </div>
             )}
+            <div ref={messagesEndRef} />
           </div>
         </div>
 
-        {/* Floating Input Area */}
-        <div style={{ 
-          padding: '0 3rem 3rem 3rem',
-          maxWidth: '864px', 
-          width: '100%', 
-          margin: '0 auto',
-          boxSizing: 'border-box'
-        }}>
-          <form onSubmit={handleChat} style={{ position: 'relative' }}>
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Send a raw message..."
-              rows={1}
-              style={{ 
-                width: '100%',
-                boxSizing: 'border-box',
-                padding: '1.25rem 4rem 1.25rem 1.25rem', 
-                borderRadius: '16px', 
-                border: '1px solid #e2e8f0', 
-                fontFamily: 'inherit',
-                fontSize: '1rem',
-                boxShadow: '0 10px 15px -3px rgba(0,0,0,0.04)',
-                resize: 'none',
-                outline: 'none',
-                backgroundColor: '#fff',
-                minHeight: '60px',
-                maxHeight: '200px',
-                overflowY: 'auto'
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleChat(e as any);
-                }
-              }}
-            />
-            {chatStatus === 'loading' ? (
-              <button
-                type="button"
-                onClick={handleStop}
+        <div style={{ padding: '2rem', borderTop: '1px solid #e2e8f0' }}>
+          <div style={{ maxWidth: '800px', margin: '0 auto', position: 'relative' }}>
+            <form onSubmit={handleChat} style={{ position: 'relative' }}>
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Send a raw message..."
+                rows={1}
+                disabled={chatStatus === 'loading'}
+                className="hide-scrollbar"
                 style={{ 
-                  position: 'absolute',
-                  right: '0.75rem',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '8px', 
-                  border: 'none', 
-                  backgroundColor: '#ef4444', 
-                  color: 'white', 
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '0.75rem',
-                  fontWeight: 700
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  padding: '1.25rem 4rem 1.25rem 1.25rem', 
+                  borderRadius: '16px', 
+                  border: '1px solid #e2e8f0', 
+                  fontFamily: 'inherit',
+                  fontSize: '1rem',
+                  boxShadow: '0 10px 15px -3px rgba(0,0,0,0.04)',
+                  resize: 'none',
+                  outline: 'none',
+                  backgroundColor: '#fff',
+                  minHeight: '60px',
+                  maxHeight: '200px',
+                  overflowY: 'auto'
                 }}
-                title="Stop generation"
-              >
-                ■
-              </button>
-            ) : (
-              <button
-                type="submit"
-                disabled={!config.baseUrl}
-                style={{ 
-                  position: 'absolute',
-                  right: '0.75rem',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '8px', 
-                  border: 'none', 
-                  backgroundColor: '#0f172a', 
-                  color: 'white', 
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleChat(e as any);
+                  }
                 }}
-              >
-                ↑
-              </button>
-            )}
-          </form>
-          <div style={{ fontSize: '0.7rem', color: '#cbd5e1', textAlign: 'center', marginTop: '0.75rem', letterSpacing: '0.02em' }}>
-            RAW INTERACTION MODE • NO MEMORY • NO SYSTEM PROMPT
+              />
+              {input.trim() && (
+                <button 
+                  type="submit"
+                  disabled={chatStatus === 'loading'}
+                  style={{ 
+                    position: 'absolute',
+                    right: '0.75rem',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '8px', 
+                    border: 'none', 
+                    backgroundColor: '#0f172a', 
+                    color: 'white', 
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                >
+                  ↑
+                </button>
+              )}
+            </form>
           </div>
         </div>
-
       </main>
 
       {showConsentWarning && (
@@ -643,7 +616,6 @@ export default function Home() {
               </button>
               <button
                 onClick={() => {
-                  setBrowserConsentState(true);
                   setBrowserConsent(true);
                   setShowConsentWarning(false);
                 }}
