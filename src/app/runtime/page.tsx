@@ -264,15 +264,12 @@ function ExecutionTrace({
           style={{
             marginBottom: '0.75rem',
             padding: '0.75rem',
-            backgroundColor: isModelCall ? '#eef2ff' : '#fff',
+            backgroundColor: '#fff',
             borderRadius: '6px',
-            border: isModelCall ? '2px solid #6366f1' : '1px solid #e2e8f0',
+            border: '1px solid #e2e8f0',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-            {isModelCall && (
-              <span style={{ fontSize: '0.7rem', color: '#6366f1' }}>&#8594;</span>
-            )}
             <span
               style={{
                 fontSize: '0.65rem',
@@ -284,7 +281,7 @@ function ExecutionTrace({
               {isModelCall ? 'model call' : item.phase}
             </span>
             <span style={{ fontSize: '0.7rem', color: '#64748b' }}>
-              {isModelCall ? `Send ${index + 1}` : `Step ${index + 1}`}
+              Step {index + 1}
             </span>
             {isModelCall && item.modelInput && (
               <button
@@ -293,9 +290,9 @@ function ExecutionTrace({
                   marginLeft: 'auto',
                   fontSize: '0.65rem',
                   fontWeight: 600,
-                  color: '#4f46e5',
-                  backgroundColor: '#e0e7ff',
-                  border: '1px solid #c7d2fe',
+                  color: '#64748b',
+                  backgroundColor: '#f1f5f9',
+                  border: '1px solid #e2e8f0',
                   borderRadius: '4px',
                   padding: '0.15rem 0.5rem',
                   cursor: 'pointer',
@@ -314,11 +311,11 @@ function ExecutionTrace({
             <div style={{ 
               marginBottom: '0.5rem',
               padding: '0.75rem',
-              backgroundColor: '#f8fafc',
+              backgroundColor: '#eef2ff',
               borderRadius: '4px',
-              border: '1px solid #e2e8f0',
+              border: '1px solid #c7d2fe',
             }}>
-              <div style={{ fontSize: '0.65rem', fontWeight: 700, color: '#64748b', marginBottom: '0.5rem', textTransform: 'uppercase' }}>
+              <div style={{ fontSize: '0.65rem', fontWeight: 700, color: '#4f46e5', marginBottom: '0.5rem', textTransform: 'uppercase' }}>
                 Messages Sent to Model ({JSON.parse(item.modelInput).length} messages)
               </div>
               <pre style={{ 
