@@ -186,6 +186,8 @@ function ExecutionTrace({
   isRunning: boolean;
   currentPhase: RunPhase | null;
 }) {
+  const [expandedContexts, setExpandedContexts] = useState<Set<string>>(new Set());
+
   const getPhaseColor = (phase: RunPhase): string => {
     switch (phase) {
       case 'ingest': return '#3b82f6';
@@ -193,6 +195,50 @@ function ExecutionTrace({
       case 'act': return '#10b981';
       case 'evaluate': return '#f59e0b';
       case 'respond': return '#ef4444';
+    }
+  };
+
+  const toggleContext = (itemId: string) => {
+    setExpandedContexts(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(itemId)) {
+        newSet.delete(itemId);
+      } else {
+        newSet.add(itemId);
+      }
+      return newSet;
+    });
+  };
+
+  const formatMessages = (messagesJson: string): string => {
+    try {
+      const messages = JSON.parse(messagesJson);
+      return messages.map((m: { role: string; content?: string; tool_calls?: Array<{ function: { name: string; arguments: string } }> }, idx: number) => {
+        const lines: string[] = [];
+        lines.push(`── Message ${idx + 1} [${m.role.toUpperCase()}] ──`);
+        
+        if (m.content) {
+          const truncated = m.content.length > 200 ? m.content.substring(0, 200) + '...' : m.content;
+          lines.push(truncated);
+        }
+        
+        if (m.tool_calls && m.tool_calls.length > 0) {
+          lines.push('');
+          m.tool_calls.forEach((tc, i) => {
+            lines.push(`Tool Call ${i + 1}: ${tc.function.name}`);
+            try {
+              const args = JSON.parse(tc.function.arguments);
+              lines.push(`  Arguments: ${JSON.stringify(args, null, 2)}`);
+            } catch {
+              lines.push(`  Arguments: ${tc.function.arguments}`);
+            }
+          });
+        }
+        
+        return lines.join('\n');
+      }).join('\n\n');
+    } catch {
+      return messagesJson;
     }
   };
 
@@ -233,11 +279,54 @@ function ExecutionTrace({
             <span style={{ fontSize: '0.7rem', color: '#64748b' }}>
               Step {index + 1}
             </span>
+            {item.modelInput && (
+              <button
+                onClick={() => toggleContext(item.id)}
+                style={{
+                  marginLeft: 'auto',
+                  fontSize: '0.65rem',
+                  fontWeight: 600,
+                  color: '#64748b',
+                  backgroundColor: '#f1f5f9',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '4px',
+                  padding: '0.15rem 0.5rem',
+                  cursor: 'pointer',
+                }}
+              >
+                {expandedContexts.has(item.id) ? 'Hide Context' : 'View Context'}
+              </button>
+            )}
           </div>
           
           <div style={{ fontSize: '0.75rem', color: '#374151', marginBottom: '0.5rem' }}>
             {item.contextSummary}
           </div>
+          
+          {expandedContexts.has(item.id) && item.modelInput && (
+            <div style={{ 
+              marginBottom: '0.5rem',
+              padding: '0.75rem',
+              backgroundColor: '#f8fafc',
+              borderRadius: '4px',
+              border: '1px solid #e2e8f0',
+            }}>
+              <div style={{ fontSize: '0.65rem', fontWeight: 700, color: '#64748b', marginBottom: '0.5rem', textTransform: 'uppercase' }}>
+                Messages Sent to Model ({JSON.parse(item.modelInput).length} messages)
+              </div>
+              <pre style={{ 
+                margin: 0, 
+                fontSize: '0.7rem', 
+                fontFamily: 'monospace', 
+                color: '#475569',
+                whiteSpace: 'pre-wrap',
+                maxHeight: '300px',
+                overflowY: 'auto',
+              }}>
+                {formatMessages(item.modelInput)}
+              </pre>
+            </div>
+          )}
           
           {item.thinkingStream && (
             <div style={{ fontSize: '0.7rem', color: '#78350f', fontStyle: 'italic', marginBottom: '0.5rem' }}>
@@ -409,9 +498,11 @@ export default function RuntimePage() {
   const simulateRun = useCallback(async () => {
     if (!activeRuntime || !input.trim()) return;
     
-    const profile = profiles.find(p => p.id === activeRuntime.profileId);
+    const profile = activeRuntime.profileId 
+      ? profiles.find(p => p.id === activeRuntime.profileId)
+      : activeProfile;
     if (!profile) {
-      alert('Please select a profile in the runtime settings first.');
+      alert('Please select a profile in the Connections page first.');
       return;
     }
     
@@ -488,21 +579,51 @@ export default function RuntimePage() {
       
       if (stage === 'calling') {
         const toolCalls = data?.toolCalls as Array<{ id: string; name: string; arguments: string }> | undefined;
+        const messages = data?.messages as Array<{ role: string; content?: string }> | undefined;
+        const promptType = data?.promptType as string | undefined;
         
-        if (toolCalls && toolCalls.length > 0) {
+        // First API call - no toolCalls yet, this is the initial plan context
+        if (!toolCalls && messages && messages.length > 0) {
           setLiveTrace(prev => {
-            if (prev.some(t => t.phase === 'plan')) return prev;
             const planItem: TraceItem = {
               id: generateId(),
               stepId: generateId(),
               phase: 'plan',
               previousPhase: 'ingest',
               nextPhase: 'act',
-              contextSummary: 'Model is determining next action',
-              transitionReason: 'Model requested tool call',
+              contextSummary: promptType === 'plan' 
+                ? 'Sending initial context to model' 
+                : 'Sending updated context to model',
+              modelInput: JSON.stringify(messages, null, 2),
+              transitionReason: promptType === 'plan'
+                ? 'Model receiving user input and determining action'
+                : 'Model receiving tool results and evaluating next action',
               timestamp: new Date().toISOString(),
             };
             return [...prev, planItem];
+          });
+        }
+        
+        // Callback after tool calls - this is the response that contains tool_calls
+        if (toolCalls && toolCalls.length > 0) {
+          const modelResponse = data?.modelResponse as { content: string; toolCalls: Array<{ name: string; arguments: string }> } | undefined;
+          setLiveTrace(prev => {
+            const existingPlan = prev.find(t => t.phase === 'plan');
+            if (existingPlan) {
+              // Update the existing plan item with the model response
+              return prev.map(t => t.phase === 'plan' && !t.responseStream
+                ? { 
+                    ...t, 
+                    contextSummary: `Model returned ${toolCalls.length} tool call(s)`,
+                    modelResponse: modelResponse || {
+                      content: '',
+                      toolCalls: toolCalls.map(tc => ({ name: tc.name, arguments: tc.arguments }))
+                    }
+                  }
+                : t
+              );
+            }
+            return prev;
           });
         }
       }
@@ -534,6 +655,7 @@ export default function RuntimePage() {
       if (stage === 'evaluate' && data) {
         setLiveTrace(prev => {
           if (prev.some(t => t.phase === 'evaluate' && t.toolCall?.name === data.toolCall)) return prev;
+          const messages = data?.messages as Array<{ role: string; content?: string }> | undefined;
           const evalItem: TraceItem = {
             id: generateId(),
             stepId: generateId(),
@@ -541,6 +663,7 @@ export default function RuntimePage() {
             previousPhase: 'act',
             nextPhase: 'plan',
             contextSummary: `Evaluated result from ${data.toolCall}`,
+            modelInput: messages ? JSON.stringify(messages, null, 2) : undefined,
             evaluationResult: data.result,
             transitionReason: 'Tool result received, continuing to next iteration',
             timestamp: new Date().toISOString(),

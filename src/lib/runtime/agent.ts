@@ -245,7 +245,12 @@ export class AgentRuntime {
       let hasMoreToolCalls = true;
 
       while (hasMoreToolCalls && toolCallCount < maxToolCalls) {
-        await this.transition('calling', { toolCallCount, attempt: toolCallCount + 1 });
+        await this.transition('calling', { 
+          toolCallCount, 
+          attempt: toolCallCount + 1,
+          messages: JSON.parse(JSON.stringify(messages)),
+          promptType: toolCallCount === 0 ? 'plan' : 'evaluate'
+        });
 
         const chatParams: Record<string, unknown> = {
           model: config.model,
@@ -316,7 +321,17 @@ export class AgentRuntime {
             }))
           });
 
-          await this.transition('calling', { toolCalls, message: 'Processing tool calls' });
+          await this.transition('calling', { 
+            toolCalls, 
+            message: 'Processing tool calls',
+            modelResponse: {
+              content: accumulatedContent,
+              toolCalls: toolCalls.map(tc => ({
+                name: tc.name,
+                arguments: tc.arguments
+              }))
+            }
+          });
 
           const toolResults: ToolCallResult[] = [];
 
@@ -354,7 +369,12 @@ export class AgentRuntime {
             }
 
             // Evaluate phase - evaluate the tool result
-            await this.transition('evaluate', { toolCall: tc.name, result, toolCallCount: toolCallCount + 1 });
+            await this.transition('evaluate', { 
+              toolCall: tc.name, 
+              result, 
+              toolCallCount: toolCallCount + 1,
+              messages: JSON.parse(JSON.stringify(messages))
+            });
 
             toolCallCount++;
           }

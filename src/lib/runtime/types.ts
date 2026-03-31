@@ -95,6 +95,10 @@ export interface TraceItem {
   nextPhase?: RunPhase;
   contextSummary: string;
   modelInput?: string;
+  modelResponse?: {
+    content: string;
+    toolCalls: Array<{ name: string; arguments: string }>;
+  };
   thinkingStream?: string;
   responseStream?: string;
   toolCall?: ToolCall;

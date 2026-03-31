@@ -944,9 +944,11 @@ export default function RuntimeBuilder() {
   const simulateRun = useCallback(async () => {
     if (!activeRuntime || !input.trim()) return;
     
-    const profile = profiles.find(p => p.id === activeRuntime.profileId);
+    const profile = activeRuntime.profileId 
+      ? profiles.find(p => p.id === activeRuntime.profileId)
+      : activeProfile;
     if (!profile) {
-      alert('Please select a profile in the runtime settings first.');
+      alert('Please select a profile in the Connections page first.');
       return;
     }
     
