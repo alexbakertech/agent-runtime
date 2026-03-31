@@ -250,6 +250,8 @@ export function createDefaultRuntimeState(): RuntimeState {
     displayConfig: {
       showThinking: true,
     },
+    runtimeFilesAccess: 'readwrite',
+    sharedFilesAccess: 'readwrite',
     createdAt: now,
     updatedAt: now,
   };
@@ -276,5 +278,6 @@ export function createEmptyRunState(runtimeId: string): RunState {
     trace: [],
     sandboxSnapshot: {},
     status: 'running',
+    contextSnapshots: {},
   };
 }

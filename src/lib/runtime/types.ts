@@ -43,6 +43,8 @@ export interface RequestAssemblyOptions {
 }
 
 // v0.1 Runtime Config (Persistent)
+export type FileAccessMode = 'disabled' | 'readonly' | 'readwrite';
+
 export interface Runtime {
   id: string;
   name: string;
@@ -67,12 +69,14 @@ export interface Runtime {
     showThinking: boolean;
   };
   profileId?: string;
+  runtimeFilesAccess: FileAccessMode;
+  sharedFilesAccess: FileAccessMode;
   createdAt: string;
   updatedAt: string;
 }
 
 // v0.1 Run State (Ephemeral)
-export type RunPhase = 'ingest' | 'plan' | 'act' | 'evaluate' | 'respond';
+export type RunPhase = 'model_call' | 'ingest' | 'plan' | 'act' | 'evaluate' | 'respond';
 export type RunStatus = 'running' | 'waiting' | 'completed' | 'failed';
 
 export interface ToolCall {
@@ -91,6 +95,10 @@ export interface TraceItem {
   nextPhase?: RunPhase;
   contextSummary: string;
   modelInput?: string;
+  modelResponse?: {
+    content: string;
+    toolCalls: Array<{ name: string; arguments: string }>;
+  };
   thinkingStream?: string;
   responseStream?: string;
   toolCall?: ToolCall;

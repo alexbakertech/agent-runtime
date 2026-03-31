@@ -1,6 +1,11 @@
-import { LoopStage, RuntimeConfig, Message, Override, RequestAssemblyOptions } from './types';
+import { LoopStage, RuntimeConfig, Message, Override, RequestAssemblyOptions, FileAccessMode } from './types';
 import { OpenAI } from 'openai';
 import { isBrowserConsentGiven } from '@/lib/api/client';
+
+export interface FileAccessPermissions {
+  runtimeFilesAccess: FileAccessMode;
+  sharedFilesAccess: FileAccessMode;
+}
 
 export type AgentEventHandler = (stage: LoopStage, data?: any) => void;
 
@@ -13,6 +18,11 @@ export interface ToolDefinition {
   };
 }
 
+export interface CustomToolImplementation {
+  name: string;
+  code: string;
+}
+
 export interface ToolCallResult {
   toolCallId: string;
   toolName: string;
@@ -22,6 +32,7 @@ export interface ToolCallResult {
 
 export interface AgentOptions {
   tools?: ToolDefinition[];
+  customTools?: CustomToolImplementation[];
   maxToolCalls?: number;
   prompts?: {
     system?: string;
@@ -29,6 +40,7 @@ export interface AgentOptions {
     evaluate?: string;
     respond?: string;
   };
+  fileAccess?: FileAccessPermissions;
 }
 
 /**
@@ -38,9 +50,6 @@ export interface AgentOptions {
 export class AgentRuntime {
   private stage: LoopStage = 'idle';
   private stageData: Record<string, any> = {};
-  private stepMode: boolean = false;
-  private isWaiting: boolean = false;
-  private nextResolver: (() => void) | null = null;
   private onEvent: AgentEventHandler;
   private trace: Array<{ stage: LoopStage; data?: any; timestamp: number }> = [];
   private options: AgentOptions = {};
@@ -53,46 +62,44 @@ export class AgentRuntime {
     this.options = options;
   }
 
-  setStepMode(mode: boolean) {
-    this.stepMode = mode;
-  }
-
   getStage() { return this.stage; }
   getTrace() { return this.trace; }
-  isWaitingForStep() { return this.isWaiting; }
+
+  private canWrite(filePath: string): boolean {
+    const access = this.options.fileAccess;
+    if (!access) return true;
+    
+    const isGlobalFile = filePath.startsWith('global/') || filePath.startsWith('global\\');
+    
+    if (isGlobalFile) {
+      return access.sharedFilesAccess === 'readwrite';
+    }
+    return access.runtimeFilesAccess === 'readwrite';
+  }
+
+  private canRead(filePath: string): boolean {
+    const access = this.options.fileAccess;
+    if (!access) return true;
+    
+    const isGlobalFile = filePath.startsWith('global/') || filePath.startsWith('global\\');
+    
+    if (isGlobalFile) {
+      return access.sharedFilesAccess !== 'disabled';
+    }
+    return access.runtimeFilesAccess !== 'disabled';
+  }
 
   private async transition(stage: LoopStage, data?: any) {
     this.stage = stage;
     if (data) this.stageData[stage] = data;
     this.trace.push({ stage, data, timestamp: Date.now() });
-
-    if (this.stepMode && stage !== 'idle' && stage !== 'finished' && stage !== 'error') {
-      this.isWaiting = true;
-      this.onEvent(stage, data);
-      return new Promise<void>(resolve => {
-        this.nextResolver = resolve;
-      });
-    }
-
     this.onEvent(stage, data);
-  }
-
-  async next() {
-    if (this.nextResolver) {
-      const resolve = this.nextResolver;
-      this.nextResolver = null;
-      this.isWaiting = false;
-      this.onEvent(this.stage, this.stageData[this.stage]);
-      resolve();
-    }
   }
 
   reset() {
     this.stage = 'idle';
     this.stageData = {};
     this.trace = [];
-    this.isWaiting = false;
-    this.nextResolver = null;
     this.onEvent('idle');
   }
 
@@ -100,6 +107,24 @@ export class AgentRuntime {
    * Execute a tool by name with the given arguments.
    */
   private async executeTool(toolName: string, args: Record<string, unknown>, sandboxFiles: { path: string; content?: string }[]): Promise<string> {
+    const customTools = this.options.customTools || [];
+    const customTool = customTools.find(t => t.name === toolName);
+    
+    if (customTool) {
+      try {
+        const fn = new Function('args', 'sandboxFiles', `
+          const __result = (async () => {
+            ${customTool.code}
+          })();
+          return __result;
+        `);
+        const result = await fn(args, sandboxFiles);
+        return JSON.stringify({ success: true, result });
+      } catch (err: any) {
+        return JSON.stringify({ error: `Custom tool error: ${err.message}` });
+      }
+    }
+    
     switch (toolName) {
       case 'get_time':
         return JSON.stringify({ 
@@ -108,27 +133,37 @@ export class AgentRuntime {
         });
       
       case 'list_files':
-        const files = sandboxFiles.map(f => ({ path: f.path, isDirectory: false }));
+        const files = sandboxFiles
+          .filter(f => this.canRead(f.path))
+          .map(f => ({ path: f.path, isDirectory: false }));
         return JSON.stringify({ files, count: files.length });
       
       case 'read_file':
         const filePath = args.filePath as string;
+        if (!this.canRead(filePath)) {
+          return JSON.stringify({ error: `Permission denied: Cannot read files in this location. Access is disabled or restricted.` });
+        }
         const file = sandboxFiles.find(f => f.path === filePath);
         if (!file) return JSON.stringify({ error: `File not found: ${filePath}` });
         return JSON.stringify({ content: file.content || '' });
       
       case 'search_text':
         const pattern = args.pattern as string;
-        const dirPath = (args.dirPath as string) || '.';
+        const searchableFiles = sandboxFiles.filter(f => this.canRead(f.path));
         const regex = new RegExp(pattern, 'g');
         const matches: { file: string; lines: string[] }[] = [];
-        for (const file of sandboxFiles) {
+        for (const file of searchableFiles) {
           if (file.content && regex.test(file.content)) {
             const lines = file.content.split('\n').filter(line => regex.test(line));
             matches.push({ file: file.path, lines: lines.slice(0, 5) });
           }
         }
         return JSON.stringify({ pattern, matches, matchCount: matches.length });
+      
+      case 'remember_for_next_run':
+        const content = args.content as string;
+        if (!content) return JSON.stringify({ error: 'Missing required parameter: content' });
+        return JSON.stringify({ success: true, message: `Will remember: ${content.substring(0, 100)}${content.length > 100 ? '...' : ''}` });
       
       default:
         return JSON.stringify({ error: `Unknown tool: ${toolName}` });
@@ -210,7 +245,12 @@ export class AgentRuntime {
       let hasMoreToolCalls = true;
 
       while (hasMoreToolCalls && toolCallCount < maxToolCalls) {
-        await this.transition('calling', { toolCallCount, attempt: toolCallCount + 1 });
+        await this.transition('calling', { 
+          toolCallCount, 
+          attempt: toolCallCount + 1,
+          messages: JSON.parse(JSON.stringify(messages)),
+          promptType: toolCallCount === 0 ? 'plan' : 'evaluate'
+        });
 
         const chatParams: Record<string, unknown> = {
           model: config.model,
@@ -228,10 +268,6 @@ export class AgentRuntime {
 
         // @ts-expect-error - OpenAI SDK typing issue with dynamic params
         const stream = await openai.chat.completions.create(chatParams);
-
-        // Debug logging
-        console.log('[AgentRuntime] Calling model with tools:', tools.map(t => t.function.name));
-        console.log('[AgentRuntime] Messages:', JSON.stringify(messages, null, 2));
 
         await this.transition('receiving');
 
@@ -272,10 +308,6 @@ export class AgentRuntime {
 
         currentResponse = accumulatedContent;
 
-        console.log('[AgentRuntime] Finish reason:', finishReason);
-        console.log('[AgentRuntime] Tool calls received:', toolCalls);
-        console.log('[AgentRuntime] Content:', accumulatedContent);
-
         // Handle tool calls - if model requested tool calls, process them and continue loop
         if (toolCalls.length > 0 && finishReason === 'tool_calls') {
           // Add assistant message with tool calls first
@@ -289,7 +321,17 @@ export class AgentRuntime {
             }))
           });
 
-          await this.transition('calling', { toolCalls, message: 'Processing tool calls' });
+          await this.transition('calling', { 
+            toolCalls, 
+            message: 'Processing tool calls',
+            modelResponse: {
+              content: accumulatedContent,
+              toolCalls: toolCalls.map(tc => ({
+                name: tc.name,
+                arguments: tc.arguments
+              }))
+            }
+          });
 
           const toolResults: ToolCallResult[] = [];
 
@@ -327,7 +369,12 @@ export class AgentRuntime {
             }
 
             // Evaluate phase - evaluate the tool result
-            await this.transition('evaluate', { toolCall: tc.name, result, toolCallCount: toolCallCount + 1 });
+            await this.transition('evaluate', { 
+              toolCall: tc.name, 
+              result, 
+              toolCallCount: toolCallCount + 1,
+              messages: JSON.parse(JSON.stringify(messages))
+            });
 
             toolCallCount++;
           }
