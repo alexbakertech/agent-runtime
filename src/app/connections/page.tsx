@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { useProfiles, useBrowserConsent, useRetryEnabled } from '@/lib/state';
+import { testConnection, fetchModels, isBrowserConsentGiven, chatStreamWithReasoning } from '@/lib/api/client';
 
 export default function ConnectionsPage() {
   const { profiles, activeProfile, addProfile, updateProfile, deleteProfile, setActiveProfile } = useProfiles();
@@ -19,12 +20,20 @@ export default function ConnectionsPage() {
     sample?: string;
   } | null>(null);
   const [testing, setTesting] = useState(false);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [fetchingModels, setFetchingModels] = useState(false);
+  const [fetchStatus, setFetchStatus] = useState<string>('');
+  const [streamingContent, setStreamingContent] = useState('');
+  const [streamingReasoning, setStreamingReasoning] = useState('');
+  const [reasoningCollapsed, setReasoningCollapsed] = useState(false);
+
+  const TEST_PROMPT = 'This is a test message, respond with "It works!" if you have received this.';
 
   const [formData, setFormData] = useState({
     name: '',
     baseUrl: 'https://api.openai.com/v1',
     apiKey: '',
-    model: 'gpt-4',
+    model: '',
   });
 
   const handleCreate = () => {
@@ -32,7 +41,7 @@ export default function ConnectionsPage() {
       name: '',
       baseUrl: 'https://api.openai.com/v1',
       apiKey: '',
-      model: 'gpt-4',
+      model: '',
     });
     setEditingId('new');
   };
@@ -40,39 +49,105 @@ export default function ConnectionsPage() {
   const handleSave = () => {
     if (!formData.name.trim()) return;
     
-    addProfile(formData.name, formData.baseUrl, formData.model, formData.apiKey);
+    if (editingId && editingId !== 'new') {
+      updateProfile(editingId, {
+        name: formData.name,
+        baseUrl: formData.baseUrl,
+        model: formData.model,
+        apiKey: formData.apiKey,
+      });
+    } else {
+      addProfile(formData.name, formData.baseUrl, formData.model, formData.apiKey);
+    }
     setEditingId(null);
   };
 
   const handleTest = async (profile: typeof profiles[0]) => {
     setTesting(true);
     setTestResult(null);
+    setStreamingContent('');
+    setStreamingReasoning('');
+    setReasoningCollapsed(false);
 
-    const startTime = Date.now();
-
-    await new Promise(resolve => setTimeout(resolve, 1500));
-
-    const latency = Date.now() - startTime;
-    const hasApiKey = !!profile.apiKey;
-
-    if (hasApiKey) {
-      setTestResult({
-        success: true,
-        message: 'Connection successful',
-        model: profile.model,
-        latency,
-        streamReceived: true,
-        reasoningReceived: profile.model.includes('o1') || profile.model.includes('claude'),
-        sample: 'This is a simulated response from the model to test connectivity.',
-      });
-    } else {
+    if (!isBrowserConsentGiven()) {
       setTestResult({
         success: false,
-        message: 'No API key configured',
+        message: 'Browser consent required. Enable "Allow browser-based API calls" in Settings.',
+      });
+      setTesting(false);
+      return;
+    }
+
+    const config = {
+      baseUrl: profile.baseUrl,
+      apiKey: profile.apiKey,
+      model: profile.model,
+    };
+
+    const startTime = Date.now();
+    let streamReceived = false;
+    let reasoningReceived = false;
+    let fullResponse = '';
+
+    try {
+      for await (const chunk of chatStreamWithReasoning(config, TEST_PROMPT)) {
+        if (chunk.content) {
+          streamReceived = true;
+          fullResponse += chunk.content;
+          setStreamingContent(prev => prev + chunk.content);
+        }
+        if (chunk.reasoning) {
+          reasoningReceived = true;
+          setStreamingReasoning(prev => prev + chunk.reasoning);
+        }
+      }
+
+      const latency = Date.now() - startTime;
+
+      setTestResult({
+        success: true,
+        message: 'Stream completed',
+        model: profile.model,
+        latency,
+        streamReceived,
+        reasoningReceived,
+        sample: fullResponse,
+      });
+    } catch (error: any) {
+      setTestResult({
+        success: false,
+        message: error.message || 'Stream failed',
       });
     }
 
     setTesting(false);
+  };
+
+  const handleFetchModels = async (profile: typeof profiles[0]) => {
+    setFetchingModels(true);
+    setAvailableModels([]);
+    setFetchStatus('Fetching models...');
+
+    const config = {
+      baseUrl: profile.baseUrl,
+      apiKey: profile.apiKey,
+      model: profile.model,
+    };
+
+    const result = await fetchModels(config, browserConsent, retryEnabled);
+
+    if (result.success && result.models) {
+      setAvailableModels(result.models);
+      setFetchStatus(`Found ${result.models.length} models`);
+    } else {
+      if (result.error === 'BROWSER_CONSENT_REQUIRED') {
+        setFetchStatus('Browser consent required. Enable in Settings.');
+      } else {
+        setFetchStatus(result.error || 'Failed to fetch models');
+      }
+    }
+
+    setFetchingModels(false);
   };
 
   return (
@@ -103,7 +178,7 @@ export default function ConnectionsPage() {
             </button>
           </div>
 
-          {editingId === 'new' && (
+          {editingId && (
             <div style={{ padding: '1rem', backgroundColor: '#f8fafc', borderRadius: '6px', marginBottom: '1rem', border: '1px solid #e2e8f0' }}>
               <div style={{ marginBottom: '1rem' }}>
                 <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
@@ -145,13 +220,54 @@ export default function ConnectionsPage() {
                 <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
                   Model
                 </label>
-                <input
-                  type="text"
-                  value={formData.model}
-                  onChange={(e) => setFormData({ ...formData, model: e.target.value })}
-                  placeholder="gpt-4"
-                  style={{ width: '100%', padding: '0.5rem', border: '1px solid #e2e8f0', borderRadius: '4px', fontSize: '0.85rem' }}
-                />
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  {availableModels.length > 0 ? (
+                    <select
+                      value={formData.model}
+                      onChange={(e) => setFormData({ ...formData, model: e.target.value })}
+                      style={{ flex: 1, padding: '0.5rem', border: '1px solid #e2e8f0', borderRadius: '4px', fontSize: '0.85rem' }}
+                    >
+                      {availableModels.map((model) => (
+                        <option key={model} value={model}>{model}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={formData.model}
+                      onChange={(e) => setFormData({ ...formData, model: e.target.value })}
+                      placeholder="e.g., gpt-4, claude-3"
+                      style={{ flex: 1, padding: '0.5rem', border: '1px solid #e2e8f0', borderRadius: '4px', fontSize: '0.85rem' }}
+                    />
+                  )}
+                  <button 
+                    onClick={() => handleFetchModels({
+                      id: 'temp',
+                      name: formData.name,
+                      baseUrl: formData.baseUrl,
+                      apiKey: formData.apiKey,
+                      model: formData.model,
+                    })}
+                    disabled={fetchingModels || !formData.apiKey}
+                    style={{
+                      padding: '0.4rem 0.75rem',
+                      backgroundColor: '#fff',
+                      color: '#64748b',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: '4px',
+                      fontSize: '0.75rem',
+                      fontWeight: 600,
+                      cursor: fetchingModels || !formData.apiKey ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {fetchingModels ? '...' : 'Fetch'}
+                  </button>
+                </div>
+                {fetchStatus && (
+                  <div style={{ fontSize: '0.75rem', color: fetchStatus.includes('Failed') || fetchStatus.includes('required') ? '#ef4444' : '#64748b', marginTop: '0.25rem' }}>
+                    {fetchStatus}
+                  </div>
+                )}
               </div>
               <div style={{ display: 'flex', gap: '0.5rem' }}>
                 <button 
@@ -239,27 +355,48 @@ export default function ConnectionsPage() {
                   >
                     Test
                   </button>
-                  {profiles.length > 1 && (
-                    <button 
-                      onClick={() => {
-                        if (confirm(`Delete profile "${profile.name}"?`)) {
-                          deleteProfile(profile.id);
-                        }
-                      }}
-                      style={{
-                        padding: '0.3rem 0.6rem',
-                        backgroundColor: '#fff',
-                        color: '#ef4444',
-                        border: '1px solid #fee2e2',
-                        borderRadius: '4px',
-                        fontSize: '0.7rem',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Delete
-                    </button>
-                  )}
+                  <button 
+                    onClick={() => {
+                      setFormData({
+                        name: profile.name,
+                        baseUrl: profile.baseUrl,
+                        apiKey: profile.apiKey,
+                        model: profile.model,
+                      });
+                      setEditingId(profile.id);
+                    }}
+                    style={{
+                      padding: '0.3rem 0.6rem',
+                      backgroundColor: '#fff',
+                      color: '#64748b',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: '4px',
+                      fontSize: '0.7rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Edit
+                  </button>
+                  <button 
+                    onClick={() => {
+                      if (confirm(`Delete profile "${profile.name}"?`)) {
+                        deleteProfile(profile.id);
+                      }
+                    }}
+                    style={{
+                      padding: '0.3rem 0.6rem',
+                      backgroundColor: '#fff',
+                      color: '#ef4444',
+                      border: '1px solid #fee2e2',
+                      borderRadius: '4px',
+                      fontSize: '0.7rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Delete
+                  </button>
                 </div>
               </div>
             ))}
@@ -279,101 +416,91 @@ export default function ConnectionsPage() {
             <div style={{ textAlign: 'center', padding: '2rem', color: '#94a3b8', fontSize: '0.85rem' }}>
               Set an active profile to test connection.
             </div>
-          ) : testing ? (
-            <div style={{ textAlign: 'center', padding: '2rem', color: '#64748b' }}>
-              <div style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>Testing connection...</div>
-              <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>Sending test prompt to {activeProfile.model}</div>
-            </div>
-          ) : testResult ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <div style={{ 
-                padding: '0.75rem', 
-                backgroundColor: testResult.success ? '#dcfce7' : '#fee2e2', 
-                borderRadius: '6px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem'
-              }}>
-                <span style={{ 
-                  width: '8px', 
-                  height: '8px', 
-                  borderRadius: '50%', 
-                  backgroundColor: testResult.success ? '#16a34a' : '#ef4444' 
-                }} />
-                <span style={{ fontSize: '0.85rem', fontWeight: 600, color: testResult.success ? '#16a34a' : '#ef4444' }}>
-                  {testResult.message}
-                </span>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div style={{ padding: '0.75rem', backgroundColor: '#f1f5f9', borderRadius: '6px' }}>
+                <div style={{ fontSize: '0.65rem', color: '#64748b', fontWeight: 600, marginBottom: '0.25rem' }}>PROMPT</div>
+                <div style={{ fontSize: '0.85rem', color: '#334155' }}>{TEST_PROMPT}</div>
               </div>
 
-              {testResult.success && (
+              {testing && (
+                <div style={{ textAlign: 'center', color: '#64748b', fontSize: '0.8rem' }}>
+                  Streaming...
+                </div>
+              )}
+
+              {streamingReasoning && (
+                <div style={{ padding: '0.75rem', backgroundColor: '#fef3c7', borderRadius: '6px' }}>
+                  <button
+                    onClick={() => setReasoningCollapsed(!reasoningCollapsed)}
+                    style={{
+                      fontSize: '0.65rem',
+                      color: '#b45309',
+                      fontWeight: 600,
+                      marginBottom: '0.25rem',
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.25rem',
+                    }}
+                  >
+                    {reasoningCollapsed ? '▶' : '▼'} REASONING
+                  </button>
+                  {!reasoningCollapsed && (
+                    <div style={{ fontSize: '0.8rem', color: '#92400e', fontStyle: 'italic' }}>{streamingReasoning}</div>
+                  )}
+                </div>
+              )}
+
+              <div style={{ padding: '0.75rem', backgroundColor: streamingContent ? '#f0fdf4' : '#f8fafc', borderRadius: '6px' }}>
+                <div style={{ fontSize: '0.65rem', color: streamingContent ? '#15803d' : '#94a3b8', fontWeight: 600, marginBottom: '0.25rem' }}>
+                  {testing ? 'RECEIVING RESPONSE...' : 'RESPONSE'}
+                </div>
+                <div style={{ fontSize: '0.85rem', color: streamingContent ? '#166534' : '#94a3b8' }}>
+                  {streamingContent || 'Click Test to start...'}
+                </div>
+              </div>
+
+              {testResult && (
                 <>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                    <div style={{ padding: '0.5rem', backgroundColor: '#f8fafc', borderRadius: '4px' }}>
-                      <div style={{ fontSize: '0.65rem', color: '#64748b' }}>MODEL</div>
-                      <div style={{ fontSize: '0.8rem', fontWeight: 600 }}>{testResult.model}</div>
+                    <div style={{ padding: '0.5rem', backgroundColor: testResult.success ? '#dcfce7' : '#fee2e2', borderRadius: '4px' }}>
+                      <div style={{ fontSize: '0.65rem', color: '#64748b' }}>STATUS</div>
+                      <div style={{ fontSize: '0.8rem', fontWeight: 600, color: testResult.success ? '#16a34a' : '#ef4444' }}>
+                        {testResult.message}
+                      </div>
                     </div>
                     <div style={{ padding: '0.5rem', backgroundColor: '#f8fafc', borderRadius: '4px' }}>
                       <div style={{ fontSize: '0.65rem', color: '#64748b' }}>LATENCY</div>
                       <div style={{ fontSize: '0.8rem', fontWeight: 600 }}>{testResult.latency}ms</div>
                     </div>
                   </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                    <div style={{ padding: '0.5rem', backgroundColor: testResult.streamReceived ? '#dcfce7' : '#fee2e2', borderRadius: '4px' }}>
-                      <div style={{ fontSize: '0.65rem', color: '#64748b' }}>STREAM RECEIVED</div>
-                      <div style={{ fontSize: '0.8rem', fontWeight: 600, color: testResult.streamReceived ? '#16a34a' : '#ef4444' }}>
-                        {testResult.streamReceived ? 'Yes' : 'No'}
-                      </div>
-                    </div>
-                    <div style={{ padding: '0.5rem', backgroundColor: testResult.reasoningReceived ? '#dcfce7' : '#f1f5f9', borderRadius: '4px' }}>
-                      <div style={{ fontSize: '0.65rem', color: '#64748b' }}>REASONING STREAM</div>
-                      <div style={{ fontSize: '0.8rem', fontWeight: 600, color: testResult.reasoningReceived ? '#16a34a' : '#64748b' }}>
-                        {testResult.reasoningReceived ? 'Yes' : 'N/A'}
-                      </div>
-                    </div>
+                  <div style={{ padding: '0.5rem', backgroundColor: '#f8fafc', borderRadius: '4px' }}>
+                    <div style={{ fontSize: '0.65rem', color: '#64748b' }}>MODEL</div>
+                    <div style={{ fontSize: '0.8rem', fontWeight: 600 }}>{testResult.model}</div>
                   </div>
-
-                  {testResult.sample && (
-                    <div style={{ padding: '0.75rem', backgroundColor: '#f8fafc', borderRadius: '4px' }}>
-                      <div style={{ fontSize: '0.65rem', color: '#64748b', marginBottom: '0.25rem' }}>SAMPLE RESPONSE</div>
-                      <div style={{ fontSize: '0.8rem', fontStyle: 'italic' }}>{testResult.sample}</div>
-                    </div>
-                  )}
                 </>
               )}
 
               <button 
                 onClick={() => handleTest(activeProfile)}
+                disabled={testing}
                 style={{
-                  padding: '0.4rem 0.75rem',
-                  backgroundColor: '#3b82f6',
+                  padding: '0.5rem 1rem',
+                  backgroundColor: testing ? '#94a3b8' : '#10b981',
                   color: '#fff',
                   border: 'none',
                   borderRadius: '4px',
                   fontSize: '0.8rem',
                   fontWeight: 600,
-                  cursor: 'pointer',
+                  cursor: testing ? 'not-allowed' : 'pointer',
                 }}
               >
-                Run Again
+                {testing ? 'Testing...' : 'Test Connection'}
               </button>
             </div>
-          ) : (
-            <button 
-              onClick={() => handleTest(activeProfile)}
-              style={{
-                padding: '0.75rem 1.5rem',
-                backgroundColor: '#10b981',
-                color: '#fff',
-                border: 'none',
-                borderRadius: '6px',
-                fontSize: '0.9rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              Test Connection
-            </button>
           )}
         </div>
 
